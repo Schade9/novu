@@ -64,7 +64,7 @@ services:
       NEW_RELIC_LICENSE_KEY: ${NEW_RELIC_LICENSE_KEY}
       API_CONTEXT_PATH: ${API_CONTEXT_PATH}
     ports:
-      - '3000:3000'
+      - '3004:3004'
   worker:
     image: 'ghcr.io/novuhq/novu/worker:0.24.0'
     depends_on:
