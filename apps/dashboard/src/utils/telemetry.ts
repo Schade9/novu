@@ -47,4 +47,5 @@ export enum TelemetryEvent {
   TEMPLATE_WORKFLOW_CLICK = 'Template Workflow Click',
   ENVIRONMENTS_PAGE_VIEWED = 'Environments Page Viewed',
   CREATE_ENVIRONMENT_CLICK = 'Create Environment Click',
+  SUBSCRIBERS_PAGE_VISIT = 'Subscribers page visit',
 }

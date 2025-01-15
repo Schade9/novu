@@ -1,4 +1,5 @@
 import { SidebarContent } from '@/components/side-navigation/sidebar';
+import { SubscribersStayTunedModal } from '@/components/side-navigation/subscribers-stay-tuned-modal';
 import { useEnvironment } from '@/context/environment/hooks';
 import { useFeatureFlag } from '@/hooks/use-feature-flag';
 import { useTelemetry } from '@/hooks/use-telemetry';
@@ -25,7 +26,6 @@ import { FreeTrialCard } from './free-trial-card';
 import { GettingStartedMenuItem } from './getting-started-menu-item';
 import { NavigationLink } from './navigation-link';
 import { OrganizationDropdown } from './organization-dropdown';
-import { SubscribersStayTunedModal } from './subscribers-stay-tuned-modal';
 
 const NavigationGroup = ({ children, label }: { children: ReactNode; label?: string }) => {
   return (
@@ -40,6 +40,7 @@ export const SideNavigation = () => {
   const { subscription, daysLeft, isLoading: isLoadingSubscription } = useFetchSubscription();
   const isFreeTrialActive = subscription?.trial.isActive || subscription?.hasPaymentMethod;
   const isEnvironmentManagementEnabled = useFeatureFlag(FeatureFlagsKeysEnum.IS_ENVIRONMENT_MANAGEMENT_ENABLED);
+  const isSubscribersPageEnabled = useFeatureFlag(FeatureFlagsKeysEnum.IS_SUBSCRIBERS_PAGE_ENABLED);
 
   const { currentEnvironment, environments, switchEnvironment } = useEnvironment();
   const track = useTelemetry();
@@ -75,14 +76,23 @@ export const SideNavigation = () => {
                 <RiRouteFill className="size-4" />
                 <span>Workflows</span>
               </NavigationLink>
-              <SubscribersStayTunedModal>
-                <span onClick={() => track(TelemetryEvent.SUBSCRIBERS_LINK_CLICKED)}>
-                  <NavigationLink>
-                    <RiGroup2Line className="size-4" />
-                    <span>Subscribers</span>
-                  </NavigationLink>
-                </span>
-              </SubscribersStayTunedModal>
+              {isSubscribersPageEnabled ? (
+                <NavigationLink
+                  to={buildRoute(ROUTES.SUBSCRIBERS, { environmentSlug: currentEnvironment?.slug ?? '' })}
+                >
+                  <RiGroup2Line className="size-4" />
+                  <span>Subscribers</span>
+                </NavigationLink>
+              ) : (
+                <SubscribersStayTunedModal>
+                  <span onClick={() => track(TelemetryEvent.SUBSCRIBERS_LINK_CLICKED)}>
+                    <NavigationLink>
+                      <RiGroup2Line className="size-4" />
+                      <span>Subscribers</span>
+                    </NavigationLink>
+                  </span>
+                </SubscribersStayTunedModal>
+              )}
             </NavigationGroup>
             <NavigationGroup label="Monitor">
               <NavigationLink

@@ -1,4 +1,5 @@
 import { ChatProviderIdEnum, ISubscriberChannel, PushProviderIdEnum } from '../../types';
+import { CursorPaginationDto } from '../pagination';
 
 interface IChannelCredentials {
   webhookUrl?: string;
@@ -24,7 +25,11 @@ export class SubscriberDto {
   subscriberId: string;
   channels?: IChannelSettings[];
   deleted: boolean;
+  createdAt: string;
+  updatedAt: string;
+  lastOnlineAt?: string;
 }
+
 export interface ISubscriberFeedResponseDto {
   _id?: string;
   firstName?: string;

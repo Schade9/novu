@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { ClassConstructor, plainToInstance } from 'class-transformer';
+import { DirectionEnum } from '@novu/shared';
 import {
   ClientSession,
   FilterQuery,
@@ -319,6 +320,102 @@ export class BaseRepository<T_DBModel, T_MappedEntity, T_Enforcement> {
    */
   async withTransaction(fn: Parameters<ClientSession['withTransaction']>[0]) {
     return (await this._model.db.startSession()).withTransaction(fn);
+  }
+
+  async findWithCursorBasedPagination({
+    query = {} as FilterQuery<T_DBModel> & T_Enforcement,
+    limit,
+    before,
+    after,
+    sortDirection = DirectionEnum.DESC,
+    paginateField,
+    enhanceQuery,
+  }: {
+    query?: FilterQuery<T_DBModel> & T_Enforcement;
+    limit: number;
+    before?: string;
+    after?: string;
+    sortDirection: DirectionEnum;
+    paginateField: string;
+    enhanceQuery?: (query: QueryWithHelpers<Array<T_DBModel>, T_DBModel>) => any;
+  }): Promise<{ data: T_MappedEntity[]; next: string | null; previous: string | null }> {
+    if (before && after) {
+      throw new DalException('Cannot specify both "before" and "after" cursors at the same time.');
+    }
+
+    const isDesc = sortDirection === DirectionEnum.DESC;
+    const sortValue = isDesc ? -1 : 1;
+
+    const paginationQuery: any = { ...query };
+
+    if (after) {
+      paginationQuery[paginateField] = isDesc ? { $lt: after } : { $gt: after };
+    } else if (before) {
+      paginationQuery[paginateField] = isDesc ? { $gt: before } : { $lt: before };
+    }
+
+    let builder = this.MongooseModel.find(paginationQuery)
+      .sort({ [paginateField]: sortValue })
+      .limit(limit + 1);
+
+    if (enhanceQuery) {
+      builder = enhanceQuery(builder);
+    }
+
+    const rawResults = await builder.exec();
+
+    const hasExtraItem = rawResults.length > limit;
+    const pageResults = rawResults.slice(0, limit);
+
+    if (pageResults.length === 0) {
+      return {
+        data: [],
+        next: null,
+        previous: null,
+      };
+    }
+
+    let nextCursor: string | null = null;
+    let prevCursor: string | null = null;
+
+    const firstItem = pageResults[0];
+    const lastItem = pageResults[pageResults.length - 1];
+
+    if (hasExtraItem) {
+      nextCursor = lastItem[paginateField];
+    }
+
+    if (after) {
+      const prevQuery: any = { ...query };
+      prevQuery[paginateField] = isDesc ? { $gt: lastItem[paginateField] } : { $lt: lastItem[paginateField] };
+
+      const maybePrev = await this.MongooseModel.findOne(prevQuery)
+        .sort({ [paginateField]: sortValue })
+        .limit(1)
+        .exec();
+      if (maybePrev) {
+        prevCursor = lastItem[paginateField];
+      }
+    } else {
+      const boundaryValue = firstItem[paginateField];
+      const oppositeQuery: any = { ...query };
+
+      oppositeQuery[paginateField] = isDesc ? { $gt: boundaryValue } : { $lt: boundaryValue };
+
+      const maybePrev = await this.MongooseModel.findOne(oppositeQuery)
+        .sort({ [paginateField]: sortValue })
+        .exec();
+
+      if (maybePrev) {
+        prevCursor = boundaryValue;
+      }
+    }
+
+    return {
+      data: this.mapEntities(pageResults),
+      next: nextCursor,
+      previous: prevCursor,
+    };
   }
 }
 

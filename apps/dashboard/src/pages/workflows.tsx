@@ -9,7 +9,7 @@ import { useFeatureFlag } from '@/hooks/use-feature-flag';
 import { useFetchWorkflows } from '@/hooks/use-fetch-workflows';
 import { useTelemetry } from '@/hooks/use-telemetry';
 import { TelemetryEvent } from '@/utils/telemetry';
-import { FeatureFlagsKeysEnum, StepTypeEnum } from '@novu/shared';
+import { FeatureFlagsKeysEnum, StepTypeEnum, DirectionEnum } from '@novu/shared';
 import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import {
@@ -46,7 +46,7 @@ export const WorkflowsPage = () => {
   const navigate = useNavigate();
   const isTemplateStoreEnabled = useFeatureFlag(FeatureFlagsKeysEnum.IS_V2_TEMPLATE_STORE_ENABLED);
   const [searchParams, setSearchParams] = useSearchParams({
-    orderDirection: 'desc',
+    orderDirection: DirectionEnum.DESC,
     orderBy: 'updatedAt',
     query: '',
   });
@@ -95,7 +95,7 @@ export const WorkflowsPage = () => {
     limit,
     offset,
     orderBy: searchParams.get('orderBy') as SortableColumn,
-    orderDirection: searchParams.get('orderDirection') as 'asc' | 'desc',
+    orderDirection: searchParams.get('orderDirection') as DirectionEnum,
     query: searchParams.get('query') || '',
   });
 
@@ -264,7 +264,7 @@ export const WorkflowsPage = () => {
               hasActiveFilters={!!hasActiveFilters}
               onClearFilters={clearFilters}
               orderBy={searchParams.get('orderBy') as SortableColumn}
-              orderDirection={searchParams.get('orderDirection') as 'asc' | 'desc'}
+              orderDirection={searchParams.get('orderDirection') as DirectionEnum}
               data={workflowsData}
               isLoading={isPending}
               isError={isError}
