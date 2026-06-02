@@ -1,5 +1,4 @@
-/* eslint-disable global-require */
-import { CommunityOrganizationRepository, CommunityUserRepository, CommunityMemberRepository } from '@novu/dal';
+import { CommunityMemberRepository, CommunityOrganizationRepository, CommunityUserRepository } from '@novu/dal';
 import { isClerkEnabled } from '@novu/shared';
 import { ClerkClientMock } from './clerk-client.mock';
 
@@ -41,8 +40,10 @@ const clerkClientMock = new ClerkClientMock();
 function getEEUserRepository() {
   // nx-ignore-next-line
   const { EEUserRepository } = require('@novu/ee-auth');
+  // nx-ignore-next-line
+  const { AnalyticsService } = require('@novu/application-generic');
 
-  return new EEUserRepository(new CommunityUserRepository(), clerkClientMock);
+  return new EEUserRepository(new CommunityUserRepository(), new AnalyticsService(), clerkClientMock);
 }
 
 function getEEOrganizationRepository() {

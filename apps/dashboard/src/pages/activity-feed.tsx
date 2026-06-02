@@ -1,29 +1,89 @@
-import { ActivityFilters, defaultActivityFilters } from '@/components/activity/activity-filters';
-import { ActivityPanel } from '@/components/activity/activity-panel';
-import { ActivityTable } from '@/components/activity/activity-table';
+import { FeatureFlagsKeysEnum } from '@novu/shared';
+import { useEffect } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { ActivityFeedContent } from '@/components/activity/activity-feed-content';
+import { ConversationsContent } from '@/components/conversations/conversations-content';
 import { DashboardLayout } from '@/components/dashboard-layout';
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/primitives/resizable';
-import { useActivityUrlState } from '@/hooks/use-activity-url-state';
-import { AnimatePresence, motion } from 'motion/react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/primitives/tabs';
+import { useEnvironment } from '@/context/environment/hooks';
+import { useFeatureFlag } from '@/hooks/use-feature-flag';
+import { useTelemetry } from '@/hooks/use-telemetry';
+import { buildRoute, ROUTES } from '@/utils/routes';
+import { TelemetryEvent } from '@/utils/telemetry';
+import { RequestsTable } from '../components/http-logs/logs-table';
 import { PageMeta } from '../components/page-meta';
 
 export function ActivityFeed() {
-  const { activityItemId, filters, filterValues, handleActivitySelect, handleFiltersChange } = useActivityUrlState();
+  const isHttpLogsPageEnabled = useFeatureFlag(FeatureFlagsKeysEnum.IS_HTTP_LOGS_PAGE_ENABLED, false);
+  const isConversationalAgentsEnabled = useFeatureFlag(FeatureFlagsKeysEnum.IS_CONVERSATIONAL_AGENTS_ENABLED, false);
+  const { currentEnvironment } = useEnvironment();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const track = useTelemetry();
 
-  const hasActiveFilters = Object.entries(filters).some(([key, value]) => {
-    // Ignore dateRange as it's always present
-    if (key === 'dateRange') return false;
+  const getCurrentTab = () => {
+    if (location.pathname.includes('/activity/conversations')) {
+      if (!isConversationalAgentsEnabled) {
+        return 'workflow-runs';
+      }
 
-    // For arrays, check if they have any items
-    if (Array.isArray(value)) return value.length > 0;
+      return 'conversations';
+    }
 
-    // For other values, check if they exist
-    return !!value;
-  });
+    if (location.pathname.includes('/activity/requests')) {
+      return 'requests';
+    }
 
-  const handleClearFilters = () => {
-    handleFiltersChange(defaultActivityFilters);
+    if (location.pathname.includes('/activity/workflow-runs')) {
+      return 'workflow-runs';
+    }
+
+    if (location.pathname.includes('/activity-feed')) {
+      return 'workflow-runs';
+    }
+
+    return 'workflow-runs';
   };
+
+  const currentTab = getCurrentTab();
+
+  const handleTabChange = (value: string) => {
+    if (!currentEnvironment?.slug) return;
+
+    if (value === 'requests') {
+      navigate(buildRoute(ROUTES.ACTIVITY_REQUESTS, { environmentSlug: currentEnvironment.slug }));
+    } else if (value === 'conversations') {
+      navigate(buildRoute(ROUTES.ACTIVITY_CONVERSATIONS, { environmentSlug: currentEnvironment.slug }));
+    } else if (value === 'workflow-runs') {
+      navigate(buildRoute(ROUTES.ACTIVITY_WORKFLOW_RUNS, { environmentSlug: currentEnvironment.slug }));
+    }
+  };
+
+  useEffect(() => {
+    if (isHttpLogsPageEnabled && location.pathname.includes('/activity-feed') && currentEnvironment?.slug) {
+      const newPath = buildRoute(ROUTES.ACTIVITY_WORKFLOW_RUNS, { environmentSlug: currentEnvironment.slug });
+      navigate(`${newPath}${location.search}`, {
+        replace: true,
+      });
+    }
+  }, [isHttpLogsPageEnabled, location.pathname, location.search, currentEnvironment?.slug, navigate]);
+
+  useEffect(() => {
+    if (
+      !isConversationalAgentsEnabled &&
+      location.pathname.includes('/activity/conversations') &&
+      currentEnvironment?.slug
+    ) {
+      const fallbackPath = buildRoute(ROUTES.ACTIVITY_WORKFLOW_RUNS, { environmentSlug: currentEnvironment.slug });
+      navigate(`${fallbackPath}${location.search}`, { replace: true });
+    }
+  }, [isConversationalAgentsEnabled, location.pathname, location.search, currentEnvironment?.slug, navigate]);
+
+  useEffect(() => {
+    if (currentTab === 'requests') {
+      track(TelemetryEvent.REQUEST_LOGS_PAGE_VISIT);
+    }
+  }, [currentTab, track]);
 
   return (
     <>
@@ -35,44 +95,34 @@ export function ActivityFeed() {
           </h1>
         }
       >
-        <ActivityFilters
-          onFiltersChange={handleFiltersChange}
-          initialValues={filterValues}
-          onReset={handleClearFilters}
-        />
-        <div className="relative flex h-[calc(100vh-88px)]">
-          <ResizablePanelGroup direction="horizontal">
-            <ResizablePanel defaultSize={70} minSize={40}>
-              <ActivityTable
-                selectedActivityId={activityItemId}
-                onActivitySelect={handleActivitySelect}
-                filters={filters}
-                hasActiveFilters={hasActiveFilters}
-                onClearFilters={handleClearFilters}
-              />
-            </ResizablePanel>
-
-            <AnimatePresence mode="wait">
-              {activityItemId && (
-                <>
-                  <ResizableHandle />
-                  <ResizablePanel defaultSize={30} minSize={30} maxSize={50}>
-                    <motion.div
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      transition={{
-                        duration: 0.2,
-                      }}
-                      className="bg-background h-full overflow-auto"
-                    >
-                      <ActivityPanel activityId={activityItemId} onActivitySelect={handleActivitySelect} />
-                    </motion.div>
-                  </ResizablePanel>
-                </>
-              )}
-            </AnimatePresence>
-          </ResizablePanelGroup>
-        </div>
+        <Tabs value={currentTab} onValueChange={handleTabChange} className="-mx-2">
+          <TabsList variant="regular" className="border-t-0">
+            <TabsTrigger value="workflow-runs" variant="regular" size="lg">
+              Workflow Runs
+            </TabsTrigger>
+            {isConversationalAgentsEnabled && (
+              <TabsTrigger value="conversations" variant="regular" size="lg">
+                Agent conversations
+              </TabsTrigger>
+            )}
+            {isHttpLogsPageEnabled && (
+              <TabsTrigger value="requests" variant="regular" size="lg">
+                Requests
+              </TabsTrigger>
+            )}
+          </TabsList>
+          <TabsContent value="workflow-runs">
+            <ActivityFeedContent contentHeight="h-[calc(100vh-170px)]" />
+          </TabsContent>
+          {isConversationalAgentsEnabled && (
+            <TabsContent value="conversations">
+              <ConversationsContent contentHeight="h-[calc(100vh-170px)]" />
+            </TabsContent>
+          )}
+          <TabsContent value="requests" className="h-[calc(100vh-140px)]">
+            <RequestsTable />
+          </TabsContent>
+        </Tabs>
       </DashboardLayout>
     </>
   );

@@ -1,5 +1,6 @@
-import { ActionTypeEnum, ChannelTypeEnum } from '../../types';
+import { ActionTypeEnum, ChannelTypeEnum, ContextPayload } from '../../types';
 import { SubscriberDto } from '../subscriber';
+import { JSONSchemaDto } from './json-schema-dto';
 
 export class RenderOutput {}
 
@@ -19,6 +20,10 @@ export class PushRenderOutput extends RenderOutput {
 export class EmailRenderOutput extends RenderOutput {
   subject: string;
   body: string;
+  from?: {
+    email?: string;
+    name?: string;
+  };
 }
 
 export class DigestOutputProcessor {
@@ -61,6 +66,18 @@ export class DelayRenderOutput extends RenderOutput {
   amount: number;
   unit: TimeUnitEnum;
 }
+
+export type ThrottleRenderOutput = RenderOutput & {
+  type: 'fixed' | 'dynamic';
+  // Fixed throttle fields
+  amount?: number;
+  unit?: 'minutes' | 'hours' | 'days';
+  // Dynamic throttle fields
+  dynamicKey?: string;
+  // Common fields
+  threshold?: number;
+  throttleKey?: string;
+};
 export enum TimeUnitEnum {
   SECONDS = 'seconds',
   MINUTES = 'minutes',
@@ -105,41 +122,60 @@ export class InAppRenderOutput extends RenderOutput {
   };
 }
 
+export type PreviewError = {
+  title: string;
+  message: string;
+  hint: string;
+};
+
 export class PreviewPayload {
   subscriber?: Partial<SubscriberDto>;
   payload?: Record<string, unknown>;
+  context?: ContextPayload;
   steps?: Record<string, unknown>; // step.stepId.unknown
+  env?: Record<string, unknown>;
 }
 
 export class GeneratePreviewResponseDto {
   previewPayloadExample: PreviewPayload;
+  schema?: JSONSchemaDto | null;
+  novuSignature?: string;
   result:
     | {
         type: ChannelTypeEnum.EMAIL;
         preview: EmailRenderOutput;
+        error?: PreviewError;
       }
     | {
         type: ChannelTypeEnum.IN_APP;
         preview: InAppRenderOutput;
+        error?: PreviewError;
       }
     | {
         type: ChannelTypeEnum.SMS;
         preview: SmsRenderOutput;
+        error?: PreviewError;
       }
     | {
         type: ChannelTypeEnum.PUSH;
         preview: PushRenderOutput;
+        error?: PreviewError;
       }
     | {
         type: ChannelTypeEnum.CHAT;
         preview: ChatRenderOutput;
+        error?: PreviewError;
       }
     | {
         type: ActionTypeEnum.DELAY;
-        preview: DigestRenderOutput;
+        preview: DelayRenderOutput;
       }
     | {
         type: ActionTypeEnum.DIGEST;
         preview: DigestRenderOutput;
+      }
+    | {
+        type: ActionTypeEnum.THROTTLE;
+        preview: ThrottleRenderOutput;
       };
 }

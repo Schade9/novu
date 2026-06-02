@@ -1,17 +1,12 @@
-import { Test } from '@nestjs/testing';
-
-import { ActiveJobsMetricQueueService } from './active-jobs-metric-queue.service';
-import { BullMqService } from '../bull-mq';
 import { WorkflowInMemoryProviderService } from '../in-memory-provider';
+import { ActiveJobsMetricQueueService } from './active-jobs-metric-queue.service';
 
 let activeJobsMetricQueueService: ActiveJobsMetricQueueService;
 
 describe('Job metrics Queue service', () => {
   describe('General', () => {
     beforeAll(async () => {
-      activeJobsMetricQueueService = new ActiveJobsMetricQueueService(
-        new WorkflowInMemoryProviderService(),
-      );
+      activeJobsMetricQueueService = new ActiveJobsMetricQueueService(new WorkflowInMemoryProviderService());
       await activeJobsMetricQueueService.queue.drain();
     });
 
@@ -30,12 +25,7 @@ describe('Job metrics Queue service', () => {
     it('should be initialised properly', async () => {
       expect(activeJobsMetricQueueService).toBeDefined();
       expect(Object.keys(activeJobsMetricQueueService)).toEqual(
-        expect.arrayContaining([
-          'topic',
-          'DEFAULT_ATTEMPTS',
-          'instance',
-          'queue',
-        ]),
+        expect.arrayContaining(['topic', 'DEFAULT_ATTEMPTS', 'bullMqService', 'queue'])
       );
       expect(activeJobsMetricQueueService.DEFAULT_ATTEMPTS).toEqual(3);
       expect(activeJobsMetricQueueService.topic).toEqual('metric-active-jobs');
@@ -56,7 +46,7 @@ describe('Job metrics Queue service', () => {
           jobsOpts: {
             removeOnComplete: true,
           },
-        }),
+        })
       );
       expect(activeJobsMetricQueueService.queue.opts.prefix).toEqual('bull');
     });
@@ -66,9 +56,7 @@ describe('Job metrics Queue service', () => {
     beforeAll(async () => {
       process.env.IS_IN_MEMORY_CLUSTER_MODE_ENABLED = 'true';
 
-      activeJobsMetricQueueService = new ActiveJobsMetricQueueService(
-        new WorkflowInMemoryProviderService(),
-      );
+      activeJobsMetricQueueService = new ActiveJobsMetricQueueService(new WorkflowInMemoryProviderService());
       await activeJobsMetricQueueService.queue.obliterate();
     });
 
@@ -78,9 +66,7 @@ describe('Job metrics Queue service', () => {
     });
 
     it('should have prefix in cluster mode', async () => {
-      expect(activeJobsMetricQueueService.queue.opts.prefix).toEqual(
-        '{metric-active-jobs}',
-      );
+      expect(activeJobsMetricQueueService.queue.opts.prefix).toEqual('{metric-active-jobs}');
     });
   });
 });

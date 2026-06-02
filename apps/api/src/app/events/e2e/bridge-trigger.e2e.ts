@@ -1,8 +1,4 @@
-import axios from 'axios';
-import { expect } from 'chai';
-import sinon from 'sinon';
-
-import { SubscribersService, UserSession } from '@novu/testing';
+import { DetailEnum } from '@novu/application-generic';
 import {
   ExecutionDetailsRepository,
   JobRepository,
@@ -10,6 +6,7 @@ import {
   NotificationTemplateRepository,
   SubscriberEntity,
 } from '@novu/dal';
+import { workflow } from '@novu/framework';
 import {
   ChannelTypeEnum,
   CreateWorkflowDto,
@@ -18,26 +15,25 @@ import {
   MessagesStatusEnum,
   StepTypeEnum,
   WorkflowCreationSourceEnum,
-  WorkflowOriginEnum,
   WorkflowResponseDto,
 } from '@novu/shared';
-import { workflow } from '@novu/framework';
 
-import { DetailEnum } from '@novu/application-generic';
-import { BridgeServer } from '../../../../e2e/bridge.server';
+import { SubscribersService, UserSession } from '@novu/testing';
+import axios from 'axios';
+import { expect } from 'chai';
+import getPort from 'get-port';
+import sinon from 'sinon';
+import { TestBridgeServer } from '../../../../e2e/test-bridge-server';
 
 const eventTriggerPath = '/v1/events/trigger';
 
 type Context = { name: string; isStateful: boolean };
-const contexts: Context[] = [
-  { name: 'stateful', isStateful: true },
-  { name: 'stateless', isStateful: false },
-];
+const contexts: Context[] = [{ name: 'stateful', isStateful: true }];
 
 contexts.forEach((context: Context) => {
   describe('Self-Hosted Bridge Trigger #novu-v2', async () => {
     let session: UserSession;
-    let bridgeServer: BridgeServer;
+    let bridgeServer: TestBridgeServer;
     const messageRepository = new MessageRepository();
     const workflowsRepository = new NotificationTemplateRepository();
     const jobRepository = new JobRepository();
@@ -47,7 +43,8 @@ contexts.forEach((context: Context) => {
     let bridge;
 
     beforeEach(async () => {
-      bridgeServer = new BridgeServer();
+      const port = await getPort();
+      bridgeServer = new TestBridgeServer(port);
       bridge = context.isStateful ? undefined : { url: `${bridgeServer.serverPath}/novu` };
       session = new UserSession();
       await session.initialize();
@@ -141,8 +138,9 @@ contexts.forEach((context: Context) => {
         }
       }
 
+      await bridgeServer.start({ workflows: [newWorkflow] });
       await triggerEvent(session, workflowId, subscriber.subscriberId, { name: 'test_name' }, bridge);
-      await session.awaitRunningJobs();
+      await session.waitForJobCompletion();
 
       const messages = await messageRepository.find({
         _environmentId: session.environment._id,
@@ -157,6 +155,143 @@ contexts.forEach((context: Context) => {
       expect(inAppMessage?.content).to.include('in-app result test_name');
       const smsMessage = messages.find((message) => message.channel === ChannelTypeEnum.SMS);
       expect(smsMessage?.content).to.include('sms result test_name');
+    });
+
+    it(`should update message template type when replacing a step with the same stepId after re-sync [${context.name}]`, async () => {
+      const workflowId = `step-type-replace-${context.name}`;
+      const middleStepId = 'shared-middle-step';
+
+      const workflowWithCustomMiddle = workflow(
+        workflowId,
+        async ({ step, payload }) => {
+          await step.inApp(
+            'first-in-app',
+            async () => ({
+              body: `first ${payload.name}`,
+            }),
+            {
+              controlSchema: {
+                type: 'object',
+                properties: {},
+              } as const,
+            }
+          );
+
+          await step.custom(
+            middleStepId,
+            async () => ({
+              data: 'custom',
+            }),
+            {
+              controlSchema: {
+                type: 'object',
+                properties: {},
+              } as const,
+            }
+          );
+
+          await step.inApp(
+            'last-in-app',
+            async () => ({
+              body: `last ${payload.name}`,
+            }),
+            {
+              controlSchema: {
+                type: 'object',
+                properties: {},
+              } as const,
+            }
+          );
+        },
+        {
+          payloadSchema: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', default: 'default_name' },
+            },
+            required: [],
+            additionalProperties: false,
+          } as const,
+        }
+      );
+
+      const workflowWithChatMiddle = workflow(
+        workflowId,
+        async ({ step, payload }) => {
+          await step.inApp(
+            'first-in-app',
+            async () => ({
+              body: `first ${payload.name}`,
+            }),
+            {
+              controlSchema: {
+                type: 'object',
+                properties: {},
+              } as const,
+            }
+          );
+
+          await step.chat(middleStepId, async () => ({
+            body: 'chat body',
+          }));
+
+          await step.inApp(
+            'last-in-app',
+            async () => ({
+              body: `last ${payload.name}`,
+            }),
+            {
+              controlSchema: {
+                type: 'object',
+                properties: {},
+              } as const,
+            }
+          );
+        },
+        {
+          payloadSchema: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', default: 'default_name' },
+            },
+            required: [],
+            additionalProperties: false,
+          } as const,
+        }
+      );
+
+      await bridgeServer.start({ workflows: [workflowWithCustomMiddle] });
+
+      if (context.isStateful) {
+        await syncWorkflow(session, workflowsRepository, workflowId, bridgeServer);
+
+        const afterCustom = await workflowsRepository.findByTriggerIdentifier(session.environment._id, workflowId);
+        expect(afterCustom?.steps?.length).to.be.eq(3);
+        const middleAfterCustom = afterCustom?.steps?.find((s) => s.stepId === middleStepId);
+        expect(middleAfterCustom?.template?.type).to.eql(StepTypeEnum.CUSTOM);
+      }
+
+      await bridgeServer.stop();
+
+      /*
+       * The framework Client caches discovery per workflow id. Reusing the same TestBridgeServer
+       * after start/stop would still serve the first discovered definition, so use a fresh server
+       * (fresh Client) for the updated workflow.
+       */
+      const chatBridgePort = await getPort();
+      const bridgeServerChat = new TestBridgeServer(chatBridgePort);
+      await bridgeServerChat.start({ workflows: [workflowWithChatMiddle] });
+
+      if (context.isStateful) {
+        await syncWorkflow(session, workflowsRepository, workflowId, bridgeServerChat);
+
+        const afterChat = await workflowsRepository.findByTriggerIdentifier(session.environment._id, workflowId);
+        expect(afterChat?.steps?.length).to.be.eq(3);
+        const middleAfterChat = afterChat?.steps?.find((s) => s.stepId === middleStepId);
+        expect(middleAfterChat?.template?.type).to.eql(StepTypeEnum.CHAT);
+      }
+
+      await bridgeServerChat.stop();
     });
 
     it(`should skip by static value [${context.name}]`, async () => {
@@ -202,7 +337,7 @@ contexts.forEach((context: Context) => {
       }
 
       await triggerEvent(session, workflowIdSkipByStatic, subscriber.subscriberId, {}, bridge);
-      await session.awaitRunningJobs();
+      await session.waitForJobCompletion();
 
       const executedMessageByStatic = await messageRepository.find({
         _environmentId: session.environment._id,
@@ -266,7 +401,7 @@ contexts.forEach((context: Context) => {
       }
 
       await triggerEvent(session, workflowIdSkipByVariable, subscriber.subscriberId, {}, bridge);
-      await session.awaitRunningJobs();
+      await session.waitForJobCompletion();
 
       const executedMessage = await messageRepository.find({
         _environmentId: session.environment._id,
@@ -318,7 +453,7 @@ contexts.forEach((context: Context) => {
 
       await triggerEvent(session, workflowId, subscriber.subscriberId, {}, bridge);
 
-      await session.awaitRunningJobs(undefined);
+      await session.waitForJobCompletion();
 
       const messagesAfter = await messageRepository.find({
         _environmentId: session.environment._id,
@@ -340,7 +475,7 @@ contexts.forEach((context: Context) => {
       await executionDetailsRepository.delete({ _environmentId: session.environment._id });
 
       await triggerEvent(session, workflowId, subscriber.subscriberId, { name: 4 }, bridge);
-      await session.awaitRunningJobs();
+      await session.waitForJobCompletion();
 
       const executionDetailsInvalidType = await executionDetailsRepository.find({
         _environmentId: session.environment._id,
@@ -399,7 +534,7 @@ contexts.forEach((context: Context) => {
 
       await triggerEvent(session, workflowId, subscriber.subscriberId, {}, bridge);
 
-      await session.awaitRunningJobs();
+      await session.waitForJobCompletion();
 
       const messagesAfterInApp = await messageRepository.find({
         _environmentId: session.environment._id,
@@ -478,7 +613,7 @@ contexts.forEach((context: Context) => {
       await triggerEvent(session, workflowId, subscriber.subscriberId, { name: 'John' }, bridge);
       await triggerEvent(session, workflowId, subscriber.subscriberId, { name: 'Bela' }, bridge);
 
-      await session.awaitRunningJobs();
+      await session.waitForJobCompletion();
 
       const messages = await messageRepository.find({
         _environmentId: session.environment._id,
@@ -559,7 +694,7 @@ contexts.forEach((context: Context) => {
 
       await triggerEvent(session, workflowId, subscriber.subscriberId, {}, bridge);
 
-      await session.awaitRunningJobs();
+      await session.waitForJobCompletion();
 
       const messagesAfter = await messageRepository.find({
         _environmentId: session.environment._id,
@@ -591,11 +726,11 @@ contexts.forEach((context: Context) => {
       await bridgeServer.start({ workflows: [exceedMaxTierDurationWorkflow] });
 
       if (context.isStateful) {
-        await discoverAndSyncBridge(session, workflowsRepository, workflowId, bridgeServer);
+        await discoverAndSyncBridge(session, workflowsRepository, exceedMaxTierDurationWorkflowId, bridgeServer);
       }
 
       const result = await triggerEvent(session, exceedMaxTierDurationWorkflowId, subscriber.subscriberId, {}, bridge);
-      await session.awaitRunningJobs();
+      await session.waitForJobCompletion();
 
       const executionDetails = await executionDetailsRepository.find({
         _environmentId: session.environment._id,
@@ -649,9 +784,10 @@ contexts.forEach((context: Context) => {
       }
 
       await triggerEvent(session, workflowId, subscriber.subscriberId, {}, bridge);
-      await session.awaitRunningJobs();
+
       await triggerEvent(session, workflowId, subscriber.subscriberId, { name: 'payload_name' }, bridge);
-      await session.awaitRunningJobs();
+
+      await session.waitForJobCompletion();
 
       const sentMessage = await messageRepository.find({
         _environmentId: session.environment._id,
@@ -714,7 +850,7 @@ contexts.forEach((context: Context) => {
 
       const controls = { steps: { [stepId]: { name: 'stored_control_name' } } };
       await triggerEvent(session, workflowId, subscriber.subscriberId, {}, bridge, controls);
-      await session.awaitRunningJobs();
+      await session.waitForJobCompletion();
 
       const sentMessage = await messageRepository.find({
         _environmentId: session.environment._id,
@@ -740,7 +876,7 @@ contexts.forEach((context: Context) => {
       }
 
       await triggerEvent(session, workflowId, subscriber.subscriberId, {}, bridge);
-      await session.awaitRunningJobs();
+      await session.waitForJobCompletion();
 
       const sentMessages = await messageRepository.find({
         _environmentId: session.environment._id,
@@ -776,7 +912,7 @@ contexts.forEach((context: Context) => {
       }
 
       await triggerEvent(session, workflowId, subscriber.subscriberId, {}, bridge);
-      await session.awaitRunningJobs();
+      await session.waitForJobCompletion();
 
       const sentMessages = await messageRepository.find({
         _environmentId: session.environment._id,
@@ -813,7 +949,7 @@ contexts.forEach((context: Context) => {
       }
 
       await triggerEvent(session, workflowId, subscriber.subscriberId, {}, bridge);
-      await session.awaitRunningJobs();
+      await session.waitForJobCompletion();
 
       const sentMessages = await messageRepository.find({
         _environmentId: session.environment._id,
@@ -850,7 +986,7 @@ contexts.forEach((context: Context) => {
       }
 
       await triggerEvent(session, workflowId, subscriber.subscriberId, {}, bridge);
-      await session.awaitRunningJobs();
+      await session.waitForJobCompletion();
 
       const sentMessages = await messageRepository.find({
         _environmentId: session.environment._id,
@@ -901,7 +1037,7 @@ contexts.forEach((context: Context) => {
       }
 
       await triggerEvent(session, workflowId, subscriber.subscriberId, {}, bridge);
-      await session.awaitRunningJobs();
+      await session.waitForJobCompletion();
 
       const sentMessages = await messageRepository.find({
         _environmentId: session.environment._id,
@@ -936,7 +1072,7 @@ contexts.forEach((context: Context) => {
       }
 
       await triggerEvent(session, workflowId, subscriber.subscriberId, {}, bridge);
-      await session.awaitRunningJobs();
+      await session.waitForJobCompletion();
 
       const sentMessages = await messageRepository.find({
         _environmentId: session.environment._id,
@@ -959,7 +1095,6 @@ contexts.forEach((context: Context) => {
       expect(executionDetailsWorkflowFiltered.length).to.be.eq(1);
     });
 
-    // eslint-disable-next-line max-len
     it(`should deliver inApp message if subscriber disabled inApp channel for readOnly workflow with inApp enabled [${context.name}]`, async () => {
       const workflowId = `enabled-readonly-workflow-level-${`${context.name}`}`;
       const newWorkflow = workflow(
@@ -1000,7 +1135,7 @@ contexts.forEach((context: Context) => {
       }
 
       await triggerEvent(session, workflowId, subscriber._id, {}, bridge);
-      await session.awaitRunningJobs();
+      await session.waitForJobCompletion();
 
       const sentMessages = await messageRepository.find({
         _environmentId: session.environment._id,
@@ -1012,7 +1147,6 @@ contexts.forEach((context: Context) => {
       expect(sentMessages.length).to.be.eq(1);
     });
 
-    // eslint-disable-next-line max-len
     it(`should NOT deliver inApp message if subscriber enables inApp channel for readOnly workflow with inApp disabled [${context.name}]`, async () => {
       const workflowId = `disabled-readonly-workflow-level-${`${context.name}`}`;
       const newWorkflow = workflow(
@@ -1053,7 +1187,7 @@ contexts.forEach((context: Context) => {
       }
 
       await triggerEvent(session, workflowId, subscriber._id, {}, bridge);
-      await session.awaitRunningJobs();
+      await session.waitForJobCompletion();
 
       const sentMessages = await messageRepository.find({
         _environmentId: session.environment._id,
@@ -1076,7 +1210,6 @@ contexts.forEach((context: Context) => {
       expect(executionDetailsWorkflowFiltered.length).to.be.eq(1);
     });
 
-    // eslint-disable-next-line max-len
     it(`should deliver inApp message if subscriber disabled inApp channel globally for readOnly workflow with inApp enabled [${context.name}]`, async () => {
       const workflowId = `enabled-readonly-global-level-${`${context.name}`}`;
       const newWorkflow = workflow(
@@ -1115,7 +1248,7 @@ contexts.forEach((context: Context) => {
       }
 
       await triggerEvent(session, workflowId, subscriber._id, {}, bridge);
-      await session.awaitRunningJobs();
+      await session.waitForJobCompletion();
 
       const sentMessages = await messageRepository.find({
         _environmentId: session.environment._id,
@@ -1127,7 +1260,6 @@ contexts.forEach((context: Context) => {
       expect(sentMessages.length).to.be.eq(1);
     });
 
-    // eslint-disable-next-line max-len
     it(`should NOT deliver inApp message if subscriber enabled inApp channel globally for readOnly workflow with inApp disabled [${context.name}]`, async () => {
       const workflowId = `disabled-readonly-global-level-${`${context.name}`}`;
       const newWorkflow = workflow(
@@ -1166,7 +1298,7 @@ contexts.forEach((context: Context) => {
       }
 
       await triggerEvent(session, workflowId, subscriber._id, {}, bridge);
-      await session.awaitRunningJobs();
+      await session.waitForJobCompletion();
 
       const sentMessages = await messageRepository.find({
         _environmentId: session.environment._id,
@@ -1189,7 +1321,6 @@ contexts.forEach((context: Context) => {
       expect(executionDetailsWorkflowFiltered.length).to.be.eq(1);
     });
 
-    // eslint-disable-next-line max-len
     it(`should deliver inApp message if subscriber enabled inApp channel globally for workflow with inApp disabled [${context.name}]`, async () => {
       if (!context.isStateful) {
         /*
@@ -1231,7 +1362,7 @@ contexts.forEach((context: Context) => {
           });
 
         await triggerEvent(session, workflowId, subscriber._id, {}, bridge);
-        await session.awaitRunningJobs();
+        await session.waitForJobCompletion();
 
         const sentMessages = await messageRepository.find({
           _environmentId: session.environment._id,
@@ -1244,7 +1375,6 @@ contexts.forEach((context: Context) => {
       }
     });
 
-    // eslint-disable-next-line max-len
     it(`should NOT deliver inApp message if subscriber disabled inApp channel globally for workflow with inApp enabled [${context.name}]`, async () => {
       if (!context.isStateful) {
         /*
@@ -1286,7 +1416,7 @@ contexts.forEach((context: Context) => {
           });
 
         await triggerEvent(session, workflowId, subscriber._id, {}, bridge);
-        await session.awaitRunningJobs();
+        await session.waitForJobCompletion();
 
         const sentMessages = await messageRepository.find({
           _environmentId: session.environment._id,
@@ -1310,7 +1440,6 @@ contexts.forEach((context: Context) => {
       }
     });
 
-    // eslint-disable-next-line max-len
     it(`should deliver inApp message if subscriber disabled inApp channel globally but enabled inApp for workflow with inApp disabled [${context.name}]`, async () => {
       if (!context.isStateful) {
         /*
@@ -1361,7 +1490,7 @@ contexts.forEach((context: Context) => {
             in_app: true,
           });
         await triggerEvent(session, workflowId, subscriber._id, {}, bridge);
-        await session.awaitRunningJobs();
+        await session.waitForJobCompletion();
 
         const sentMessages = await messageRepository.find({
           _environmentId: session.environment._id,
@@ -1374,7 +1503,6 @@ contexts.forEach((context: Context) => {
       }
     });
 
-    // eslint-disable-next-line max-len
     it(`should NOT deliver inApp message if subscriber enabled inApp channel globally but disabled inApp for workflow with inApp enabled [${context.name}]`, async () => {
       if (!context.isStateful) {
         /*
@@ -1426,7 +1554,7 @@ contexts.forEach((context: Context) => {
           });
 
         await triggerEvent(session, workflowId, subscriber._id, {}, bridge);
-        await session.awaitRunningJobs();
+        await session.waitForJobCompletion();
 
         const sentMessages = await messageRepository.find({
           _environmentId: session.environment._id,
@@ -1481,7 +1609,7 @@ contexts.forEach((context: Context) => {
                 properties: {
                   subject: {
                     type: 'string',
-                    default: `A Successful Test on Novu from defualt_name`,
+                    default: `A Successful Test on Novu from default_name`,
                   },
                 },
               } as const,
@@ -1510,7 +1638,7 @@ contexts.forEach((context: Context) => {
       }
 
       await triggerEvent(session, workflowId, subscriber.subscriberId, { userName: 'John Doe' }, bridge);
-      await session.awaitRunningJobs();
+      await session.waitForJobCompletion();
 
       // Verify inApp message was skipped
       const inAppMessages = await messageRepository.find({
@@ -1527,7 +1655,7 @@ contexts.forEach((context: Context) => {
         channel: StepTypeEnum.EMAIL,
       });
       expect(emailMessages.length).to.eq(1);
-      expect(emailMessages[0].subject).to.include('A Successful Test on Novu from defualt_name');
+      expect(emailMessages[0].subject).to.include('A Successful Test on Novu from default_name');
     });
 
     it(`should execute both inApp and email steps when userName is not John Doe [${context.name}]`, async () => {
@@ -1589,7 +1717,7 @@ contexts.forEach((context: Context) => {
       }
 
       await triggerEvent(session, workflowId, subscriber.subscriberId, { userName: 'Jane Doe' }, bridge);
-      await session.awaitRunningJobs();
+      await session.waitForJobCompletion();
 
       // Verify inApp message was not skipped
       const inAppMessages = await messageRepository.find({
@@ -1608,6 +1736,336 @@ contexts.forEach((context: Context) => {
       });
       expect(emailMessages.length).to.eq(1);
       expect(emailMessages[0].subject).to.include('Welcome to Novu Jane Doe');
+    });
+
+    it(`should succeed workflow if delay step is skipped via payload [${context.name}]`, async () => {
+      const workflowId = `delay-skip-causes-failure-${context.name}`;
+      const delayStepId = 'delay-step-under-test'; // Used for clarity, not directly in queries
+      const inAppStep1Name = 'in-app-before-delay';
+      const inAppStep2Name = 'in-app-after-delay';
+
+      const newWorkflow = workflow(
+        workflowId,
+        async ({ step, payload }) => {
+          await step.inApp(inAppStep1Name, async () => ({ body: 'Message from before delay' }));
+
+          await step.delay(
+            delayStepId,
+            async () => ({ type: 'regular', amount: 1, unit: 'seconds' }), // Short delay for test speed
+            {
+              skip: () => payload.skipTheDelay === true,
+            }
+          );
+
+          await step.inApp(inAppStep2Name, async () => ({ body: 'Message from after delay' }));
+        },
+        {
+          payloadSchema: {
+            type: 'object',
+            properties: {
+              skipTheDelay: { type: 'boolean' },
+            },
+            required: ['skipTheDelay'],
+            additionalProperties: false,
+          } as const,
+        }
+      );
+
+      await bridgeServer.start({ workflows: [newWorkflow] });
+
+      if (context.isStateful) {
+        await discoverAndSyncBridge(session, workflowsRepository, workflowId, bridgeServer);
+        const foundWorkflow = await workflowsRepository.findByTriggerIdentifier(session.environment._id, workflowId);
+        expect(foundWorkflow, 'Stateful: Workflow should be found after sync').to.be.ok;
+      }
+
+      // Delay is skipped (workflow should succeed) ---
+      const triggerResultNoSkip = await triggerEvent(
+        session,
+        workflowId,
+        subscriber.subscriberId,
+        { skipTheDelay: true },
+        bridge
+      );
+      const transactionIdNoSkip = triggerResultNoSkip?.data?.data?.transactionId;
+      expect(transactionIdNoSkip, 'Scenario 1: TransactionId should exist for successful trigger').to.be.ok;
+
+      if (transactionIdNoSkip) {
+        await session.waitForJobCompletion(transactionIdNoSkip);
+
+        const messagesNoSkip = await messageRepository.find({
+          _environmentId: session.environment._id,
+          _subscriberId: subscriber._id,
+          transactionId: transactionIdNoSkip,
+          channel: StepTypeEnum.IN_APP,
+        });
+        expect(messagesNoSkip.length).to.equal(
+          2,
+          'Scenario 1: Should have 2 in-app messages when delay is not skipped'
+        );
+        expect(messagesNoSkip.some((message) => message.content === 'Message from before delay')).to.be.true;
+        expect(messagesNoSkip.some((message) => message.content === 'Message from after delay')).to.be.true;
+
+        const delayJobNoSkip = await jobRepository.findOne({
+          _environmentId: session.environment._id,
+          transactionId: transactionIdNoSkip,
+          type: StepTypeEnum.DELAY,
+        });
+        expect(delayJobNoSkip?.status).to.equal(JobStatusEnum.SKIPPED, 'Scenario 1: Delay job should be SKIPPED');
+
+        const failedExecDetailsNoSkip = await executionDetailsRepository.find({
+          _environmentId: session.environment._id,
+          transactionId: transactionIdNoSkip,
+          status: ExecutionDetailsStatusEnum.FAILED,
+        });
+        expect(failedExecDetailsNoSkip.length).to.equal(0, 'Scenario 1: Should have no failed execution details');
+      }
+    });
+
+    describe('External workflow control values validation', () => {
+      it(`should accept flexible JSON objects in control values for external workflows [${context.name}]`, async () => {
+        const workflowId = `external-flexible-controls-${context.name}`;
+        const stepId = 'send-email';
+
+        const newWorkflow = workflow(workflowId, async ({ step }) => {
+          await step.email(
+            stepId,
+            async (controls) => {
+              return {
+                subject: `${controls.customSubject || 'Default Subject'}`,
+                body: `${controls.customBody || 'Default Body'}`,
+              };
+            },
+            {
+              controlSchema: {
+                type: 'object',
+                properties: {
+                  customSubject: { type: 'string', default: 'Default Subject' },
+                  customBody: { type: 'string', default: 'Default Body' },
+                },
+              } as const,
+            }
+          );
+        });
+
+        await bridgeServer.start({ workflows: [newWorkflow] });
+
+        if (context.isStateful) {
+          await discoverAndSyncBridge(session, workflowsRepository, workflowId, bridgeServer);
+
+          // Update with flexible control values that wouldn't be allowed in NOVU_CLOUD workflows
+          const flexibleControlValues = {
+            variables: {
+              // Standard fields
+              customSubject: 'External workflow subject',
+              customBody: 'External workflow body',
+              // Custom fields that wouldn't be in EmailControlDto
+              customField: 'This is allowed in external workflows',
+              nestedObject: {
+                key1: 'value1',
+                key2: 42,
+                key3: true,
+              },
+              arrayField: ['item1', 'item2', 'item3'],
+              metadata: {
+                source: 'external-system',
+                timestamp: new Date().toISOString(),
+                version: '1.0',
+              },
+            },
+          };
+
+          const updateResponse = await saveControlValues(session, workflowId, stepId, flexibleControlValues);
+          expect(updateResponse.status).to.equal(200);
+        }
+
+        await triggerEvent(session, workflowId, subscriber.subscriberId, {}, bridge);
+        await session.waitForJobCompletion();
+
+        const sentMessages = await messageRepository.find({
+          _environmentId: session.environment._id,
+          _subscriberId: subscriber._id,
+          templateIdentifier: workflowId,
+          channel: StepTypeEnum.EMAIL,
+        });
+
+        expect(sentMessages.length).to.be.eq(1);
+        if (context.isStateful) {
+          expect(sentMessages[0].subject).to.include('External workflow subject');
+        } else {
+          // Stateless workflows use defaults when no controls are saved
+          expect(sentMessages[0].subject).to.include('Default Subject');
+        }
+      });
+
+      it(`should accept completely arbitrary JSON structure for external workflows [${context.name}]`, async () => {
+        const workflowId = `external-arbitrary-controls-${context.name}`;
+        const stepId = 'send-email';
+
+        const newWorkflow = workflow(workflowId, async ({ step }) => {
+          await step.email(
+            stepId,
+            async (controls) => {
+              return {
+                subject: `Framework: ${controls.customFramework?.name || 'Unknown'}`,
+                body: `Features: ${Array.isArray(controls.externalConfig?.features) ? controls.externalConfig.features.join(', ') : 'None'}`,
+              };
+            },
+            {
+              controlSchema: {
+                type: 'object',
+                properties: {
+                  customFramework: { type: 'object' },
+                  externalConfig: { type: 'object' },
+                },
+              } as const,
+            }
+          );
+        });
+
+        await bridgeServer.start({ workflows: [newWorkflow] });
+
+        if (context.isStateful) {
+          await discoverAndSyncBridge(session, workflowsRepository, workflowId, bridgeServer);
+
+          // Update with completely arbitrary data structure
+          const arbitraryControlValues = {
+            variables: {
+              customFramework: {
+                name: 'CustomNotificationFramework',
+                version: '2.0.0',
+                plugins: [
+                  { name: 'validator', config: { strict: false } },
+                  { name: 'renderer', config: { cache: true } },
+                ],
+              },
+              userDefinedFields: {
+                field1: 'string value',
+                field2: 12345,
+                field3: [1, 2, 3, 4, 5],
+                field4: {
+                  nested: {
+                    deeply: {
+                      value: 'deep nesting is allowed',
+                    },
+                  },
+                },
+              },
+              flags: {
+                enableFeatureA: true,
+                enableFeatureB: false,
+                experimentalFeatures: ['feature1', 'feature2'],
+              },
+              externalConfig: {
+                templateEngine: 'handlebars',
+                features: ['responsive', 'dark-mode'],
+              },
+            },
+          };
+
+          const updateResponse = await saveControlValues(session, workflowId, stepId, arbitraryControlValues);
+          expect(updateResponse.status).to.equal(200);
+        }
+
+        await triggerEvent(session, workflowId, subscriber.subscriberId, {}, bridge);
+        await session.waitForJobCompletion();
+
+        const sentMessages = await messageRepository.find({
+          _environmentId: session.environment._id,
+          _subscriberId: subscriber._id,
+          templateIdentifier: workflowId,
+          channel: StepTypeEnum.EMAIL,
+        });
+
+        expect(sentMessages.length).to.be.eq(1);
+        if (context.isStateful) {
+          expect(sentMessages[0].subject).to.include('CustomNotificationFramework');
+          expect(sentMessages[0].content).to.include('responsive, dark-mode');
+        } else {
+          // Stateless workflows use defaults when no controls are saved
+          expect(sentMessages[0].subject).to.include('Unknown');
+        }
+      });
+
+      it(`should handle mixed standard and custom fields for external workflows [${context.name}]`, async () => {
+        const workflowId = `external-mixed-controls-${context.name}`;
+        const stepId = 'send-in-app';
+
+        const newWorkflow = workflow(workflowId, async ({ step }) => {
+          await step.inApp(
+            stepId,
+            async (controls) => {
+              return {
+                subject: `${controls.subject || 'Default Subject'}`,
+                body: `${controls.body || 'Default Body'} - Priority: ${controls.customPriority || 'normal'}`,
+                avatar: controls.avatar,
+              };
+            },
+            {
+              controlSchema: {
+                type: 'object',
+                properties: {
+                  subject: { type: 'string', default: 'Default Subject' },
+                  body: { type: 'string', default: 'Default Body' },
+                  avatar: { type: 'string' },
+                  customPriority: { type: 'string', default: 'normal' },
+                },
+              } as const,
+            }
+          );
+        });
+
+        await bridgeServer.start({ workflows: [newWorkflow] });
+
+        if (context.isStateful) {
+          await discoverAndSyncBridge(session, workflowsRepository, workflowId, bridgeServer);
+
+          // Update with mixed standard and custom fields
+          const mixedControlValues = {
+            variables: {
+              // Standard in-app fields
+              subject: 'Mixed workflow subject',
+              body: 'Mixed workflow body',
+              avatar: 'https://example.com/avatar.png',
+              // Custom fields that wouldn't be in standard InAppControlDto
+              customPriority: 'high',
+              customNotificationType: 'alert',
+              customMetadata: {
+                source: 'external-system',
+                timestamp: new Date().toISOString(),
+                version: '1.0',
+              },
+              customActions: [
+                { id: 'action1', label: 'Custom Action 1', type: 'button' },
+                { id: 'action2', label: 'Custom Action 2', type: 'link' },
+              ],
+            },
+          };
+
+          const updateResponse = await saveControlValues(session, workflowId, stepId, mixedControlValues);
+          expect(updateResponse.status).to.equal(200);
+        }
+
+        await triggerEvent(session, workflowId, subscriber.subscriberId, {}, bridge);
+        await session.waitForJobCompletion();
+
+        const sentMessages = await messageRepository.find({
+          _environmentId: session.environment._id,
+          _subscriberId: subscriber._id,
+          templateIdentifier: workflowId,
+          channel: StepTypeEnum.IN_APP,
+        });
+
+        expect(sentMessages.length).to.be.eq(1);
+        if (context.isStateful) {
+          expect(sentMessages[0].subject).to.include('Mixed workflow subject');
+          expect(sentMessages[0].content).to.include('Priority: high');
+        } else {
+          // Stateless workflows use defaults when no controls are saved
+          expect(sentMessages[0].subject).to.include('Default Subject');
+          expect(sentMessages[0].content).to.include('Priority: normal');
+        }
+      });
     });
   });
 });
@@ -1657,7 +2115,7 @@ describe('Novu-Hosted Bridge Trigger #novu-v2', () => {
     const responseData = response.body.data as WorkflowResponseDto;
 
     await triggerEvent(session, responseData.workflowId, subscriber._id, {});
-    await session.awaitRunningJobs();
+    await session.waitForJobCompletion();
 
     const sentMessages = await messageRepository.find({
       _environmentId: session.environment._id,
@@ -1668,13 +2126,148 @@ describe('Novu-Hosted Bridge Trigger #novu-v2', () => {
 
     expect(sentMessages.length).to.be.eq(2);
   });
+
+  it('should render control values with payload containing double quotes', async () => {
+    const createWorkflowDto: CreateWorkflowDto = {
+      tags: [],
+      active: true,
+      name: 'Test Quotes Workflow',
+      description: 'Test Workflow with Quotes',
+      __source: WorkflowCreationSourceEnum.DASHBOARD,
+      workflowId: 'test-quotes-workflow',
+      steps: [
+        {
+          type: StepTypeEnum.IN_APP,
+          name: 'In App Step',
+          controlValues: {
+            subject: '{{payload.title}}',
+            body: '{{payload.body}}',
+          },
+        },
+      ],
+    };
+
+    const response = await session.testAgent.post(`/v2/workflows`).send(createWorkflowDto);
+    expect(response.status).to.be.eq(201);
+
+    const responseData = response.body.data as WorkflowResponseDto;
+
+    const payloadWithQuotes = {
+      title: 'Test message with "quotes"',
+      body: 'This content has "double quotes" and "special characters" in the text',
+    };
+
+    await triggerEvent(session, responseData.workflowId, subscriber._id, payloadWithQuotes);
+    await session.waitForJobCompletion();
+
+    const sentMessages = await messageRepository.find({
+      _environmentId: session.environment._id,
+      _subscriberId: session.subscriberProfile?._id,
+      templateIdentifier: responseData.workflowId,
+      channel: StepTypeEnum.IN_APP,
+    });
+
+    expect(sentMessages.length).to.be.eq(1);
+    expect(sentMessages[0].subject).to.equal('Test message with "quotes"');
+    expect(sentMessages[0].content).to.include('"double quotes"');
+    expect(sentMessages[0].content).to.include('"special characters"');
+  });
+
+  it('should handle empty body with non-empty subject in in-app step', async () => {
+    const createWorkflowDto: CreateWorkflowDto = {
+      tags: [],
+      active: true,
+      name: 'Test Empty Body Workflow',
+      description: 'Test Workflow with Empty Body',
+      __source: WorkflowCreationSourceEnum.DASHBOARD,
+      workflowId: 'test-empty-body-workflow',
+      steps: [
+        {
+          type: StepTypeEnum.IN_APP,
+          name: 'In App Step',
+          controlValues: {
+            subject: '{{payload.title}}',
+            body: '{{payload.body}}',
+          },
+        },
+      ],
+    };
+
+    const response = await session.testAgent.post(`/v2/workflows`).send(createWorkflowDto);
+    expect(response.status).to.be.eq(201);
+
+    const responseData = response.body.data as WorkflowResponseDto;
+
+    const payloadWithEmptyBody = {
+      title: 'Test Subject',
+      body: '',
+    };
+
+    await triggerEvent(session, responseData.workflowId, subscriber._id, payloadWithEmptyBody);
+    await session.waitForJobCompletion();
+
+    const sentMessages = await messageRepository.find({
+      _environmentId: session.environment._id,
+      _subscriberId: session.subscriberProfile?._id,
+      templateIdentifier: responseData.workflowId,
+      channel: StepTypeEnum.IN_APP,
+    });
+
+    expect(sentMessages.length).to.be.eq(1);
+    expect(sentMessages[0].subject).to.equal('Test Subject');
+  });
+
+  it('should handle empty subject with non-empty body in in-app step', async () => {
+    const createWorkflowDto: CreateWorkflowDto = {
+      tags: [],
+      active: true,
+      name: 'Test Empty Subject Workflow',
+      description: 'Test Workflow with Empty Subject',
+      __source: WorkflowCreationSourceEnum.DASHBOARD,
+      workflowId: 'test-empty-subject-workflow',
+      steps: [
+        {
+          type: StepTypeEnum.IN_APP,
+          name: 'In App Step',
+          controlValues: {
+            subject: '{{payload.title}}',
+            body: '{{payload.body}}',
+          },
+        },
+      ],
+    };
+
+    const response = await session.testAgent.post(`/v2/workflows`).send(createWorkflowDto);
+    expect(response.status).to.be.eq(201);
+
+    const responseData = response.body.data as WorkflowResponseDto;
+
+    const payloadWithEmptySubject = {
+      title: '',
+      body: 'This is the message body',
+    };
+
+    await triggerEvent(session, responseData.workflowId, subscriber._id, payloadWithEmptySubject);
+    await session.waitForJobCompletion();
+
+    const sentMessages = await messageRepository.find({
+      _environmentId: session.environment._id,
+      _subscriberId: session.subscriberProfile?._id,
+      templateIdentifier: responseData.workflowId,
+      channel: StepTypeEnum.IN_APP,
+    });
+
+    expect(sentMessages.length).to.be.eq(1);
+    expect(sentMessages[0].subject).to.be.undefined;
+    expect(sentMessages[0].content).to.equal('This is the message body');
+  });
 });
 
 async function syncWorkflow(
   session: UserSession,
   workflowsRepository: NotificationTemplateRepository,
   workflowIdentifier: string,
-  bridgeServer: BridgeServer
+  bridgeServer: TestBridgeServer
 ) {
   await session.testAgent.post(`/v1/bridge/sync`).send({
     bridgeUrl: `${bridgeServer.serverPath}/novu`,
@@ -1698,7 +2291,7 @@ async function triggerEvent(
     name: 'test_name',
   };
 
-  return await axios.post(
+  const response = await axios.post(
     `${session.serverUrl}${eventTriggerPath}`,
     {
       name: workflowId,
@@ -1716,13 +2309,15 @@ async function triggerEvent(
       },
     }
   );
+
+  return response;
 }
 
 async function discoverAndSyncBridge(
   session: UserSession,
   workflowsRepository?: NotificationTemplateRepository,
   workflowIdentifier?: string,
-  bridgeServer?: BridgeServer
+  bridgeServer?: TestBridgeServer
 ) {
   const discoverResponse = await session.testAgent.post(`/v1/bridge/sync`).send({
     bridgeUrl: `${bridgeServer?.serverPath}/novu`,

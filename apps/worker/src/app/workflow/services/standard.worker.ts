@@ -1,29 +1,28 @@
 import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
-
-import { ObservabilityBackgroundTransactionEnum } from '@novu/shared';
 import {
   BullMqService,
+  FeatureFlagsService,
   getStandardWorkerOptions,
   IStandardDataDto,
   Job,
   PinoLogger,
+  SqsService,
   StandardWorkerService,
-  storage,
   Store,
+  storage,
   WorkerOptions,
   WorkflowInMemoryProviderService,
 } from '@novu/application-generic';
-
+import { CommunityOrganizationRepository, JobRepository } from '@novu/dal';
+import { FeatureFlagsKeysEnum, JobStatusEnum, ObservabilityBackgroundTransactionEnum } from '@novu/shared';
 import {
+  HandleLastFailedJob,
+  HandleLastFailedJobCommand,
   RunJob,
   RunJobCommand,
-  SetJobAsCommand,
-  SetJobAsCompleted,
   SetJobAsFailed,
   SetJobAsFailedCommand,
   WebhookFilterBackoffStrategy,
-  HandleLastFailedJobCommand,
-  HandleLastFailedJob,
 } from '../usecases';
 
 const nr = require('newrelic');
@@ -35,20 +34,38 @@ export class StandardWorker extends StandardWorkerService {
   constructor(
     private handleLastFailedJob: HandleLastFailedJob,
     private runJob: RunJob,
-    @Inject(forwardRef(() => SetJobAsCompleted)) private setJobAsCompleted: SetJobAsCompleted,
     @Inject(forwardRef(() => SetJobAsFailed)) private setJobAsFailed: SetJobAsFailed,
     @Inject(forwardRef(() => WebhookFilterBackoffStrategy))
     private webhookFilterBackoffStrategy: WebhookFilterBackoffStrategy,
     @Inject(forwardRef(() => WorkflowInMemoryProviderService))
-    public workflowInMemoryProviderService: WorkflowInMemoryProviderService
+    public workflowInMemoryProviderService: WorkflowInMemoryProviderService,
+    private organizationRepository: CommunityOrganizationRepository,
+    private jobRepository: JobRepository,
+    sqsService: SqsService,
+    logger: PinoLogger,
+    private featureFlagsService: FeatureFlagsService
   ) {
-    super(new BullMqService(workflowInMemoryProviderService));
+    super(new BullMqService(workflowInMemoryProviderService), sqsService, logger);
 
-    this.initWorker(this.getWorkerProcessor(), this.getWorkerOptions());
+    this.initWorker(this.getWorkerProcessor(), this.getWorkerOptions(), true);
 
-    this.worker.on('failed', async (job: Job<IStandardDataDto, void, string>, error: Error): Promise<void> => {
+    this.bullMqWorker.on('failed', async (job: Job<IStandardDataDto, void, string>, error: Error): Promise<void> => {
       await this.jobHasFailed(job, error);
     });
+
+    this.bullMqWorker.on('completed', async (job: Job<IStandardDataDto, void, string>): Promise<void> => {
+      await this.jobHasCompleted(job);
+    });
+
+    this.setSqsCompletedHandler(async (job: Job<IStandardDataDto, void, string>): Promise<void> => {
+      await this.jobHasCompleted(job);
+    });
+
+    this.setSqsFailedHandler(async (job: Job<IStandardDataDto, void, string>, error: Error): Promise<boolean> => {
+      return await this.jobHasFailed(job, error);
+    });
+
+    this.startSqsConsumer();
   }
 
   private getWorkerOptions(): WorkerOptions {
@@ -72,7 +89,7 @@ export class StandardWorker extends StandardWorkerService {
       const message = data.payload?.message;
 
       if (!message) {
-        throw new Error(`Job data is missing required fields${JSON.stringify(data)}`);
+        throw new Error(`Job data is missing required fields: ${JSON.stringify(data)}`);
       }
 
       return {
@@ -91,9 +108,42 @@ export class StandardWorker extends StandardWorkerService {
     };
   }
 
+  private async isKillSwitchEnabled(data: IStandardDataDto): Promise<boolean> {
+    return this.featureFlagsService.getFlag({
+      key: FeatureFlagsKeysEnum.IS_ORG_KILLSWITCH_FLAG_ENABLED,
+      defaultValue: false,
+      organization: { _id: data._organizationId },
+      environment: { _id: data._environmentId },
+      component: 'worker',
+    });
+  }
+
   private getWorkerProcessor() {
     return async ({ data }: { data: IStandardDataDto }) => {
+      const isKillSwitchEnabled = await this.isKillSwitchEnabled(data);
+
+      if (isKillSwitchEnabled) {
+        Logger.log(`Kill switch enabled for organizationId ${data._organizationId}. Skipping job.`, LOG_CONTEXT);
+
+        return;
+      }
+
+      if (data.skipProcessing) {
+        Logger.log(`Skipping job ${data._id} - skipProcessing flag is set,`, LOG_CONTEXT);
+
+        return;
+      }
       const minimalJobData = this.extractMinimalJobData(data);
+      const organizationExists = await this.organizationExist(data);
+
+      if (!organizationExists) {
+        Logger.verbose(
+          `Organization not found for organizationId ${minimalJobData.organizationId}. Skipping job.`,
+          LOG_CONTEXT
+        );
+
+        return;
+      }
 
       Logger.verbose(`Job ${minimalJobData.jobId} is being processed in the new instance standard worker`, LOG_CONTEXT);
 
@@ -135,22 +185,29 @@ export class StandardWorker extends StandardWorkerService {
     try {
       const minimalData = this.extractMinimalJobData(job.data);
       jobId = minimalData.jobId;
-      const { environmentId } = minimalData;
-      const { userId } = minimalData;
 
-      await this.setJobAsCompleted.execute(
-        SetJobAsCommand.create({
-          environmentId,
-          jobId,
-          userId,
-        })
+      /*
+       * The job might have been cancelled in the pipeline (e.g., by a digest or delay step)
+       * In such cases, we only update jobs that are in RUNNING status to COMPLETED, preserving other final statuses
+       */
+      await this.jobRepository.updateOne(
+        {
+          _environmentId: minimalData.environmentId,
+          _id: minimalData.jobId,
+          status: JobStatusEnum.RUNNING,
+        },
+        {
+          $set: {
+            status: JobStatusEnum.COMPLETED,
+          },
+        }
       );
     } catch (error) {
       Logger.error(error, `Failed to set job ${jobId} as completed`, LOG_CONTEXT);
     }
   }
 
-  private async jobHasFailed(job: Job<IStandardDataDto, void, string>, error: Error): Promise<void> {
+  private async jobHasFailed(job: Job<IStandardDataDto, void, string>, error: Error): Promise<boolean> {
     let jobId;
 
     nr.noticeError(error);
@@ -165,7 +222,29 @@ export class StandardWorker extends StandardWorkerService {
 
       const shouldBeSetAsFailed = !hasToBackoff || shouldHandleLastFailedJob;
       if (shouldBeSetAsFailed) {
-        await this.setJobAsFailed.execute(SetJobAsFailedCommand.create(minimalData), error);
+        let isLastJobInWorkflow = false;
+
+        const jobEntity = await this.jobRepository.findOne({
+          _id: minimalData.jobId,
+          _environmentId: minimalData.environmentId,
+        });
+
+        if (jobEntity) {
+          const hasNextJob = await this.jobRepository.findOne({
+            _environmentId: minimalData.environmentId,
+            _parentId: minimalData.jobId,
+          });
+
+          const shouldHaltOnFailure =
+            jobEntity.step?.shouldStopOnFail === undefined ? true : jobEntity.step.shouldStopOnFail;
+
+          isLastJobInWorkflow = !hasNextJob || shouldHaltOnFailure;
+        }
+
+        await this.setJobAsFailed.execute(
+          SetJobAsFailedCommand.create({ ...minimalData, isLastJobFailed: isLastJobInWorkflow }),
+          error
+        );
       }
 
       if (shouldHandleLastFailedJob) {
@@ -176,8 +255,12 @@ export class StandardWorker extends StandardWorkerService {
           })
         );
       }
+
+      return hasToBackoff && !hasReachedMaxAttempts;
     } catch (anotherError) {
       Logger.error(anotherError, `Failed to set job ${jobId} as failed`, LOG_CONTEXT);
+
+      return true;
     }
   }
 
@@ -193,4 +276,11 @@ export class StandardWorker extends StandardWorkerService {
       });
     };
   };
+
+  private async organizationExist(data: IStandardDataDto): Promise<boolean> {
+    const { _organizationId } = data;
+    const organization = await this.organizationRepository.findOne({ _id: _organizationId });
+
+    return !!organization;
+  }
 }

@@ -1,4 +1,6 @@
 import { PostActionEnum } from '../constants';
+import type { ContextResolved } from './context.types';
+import type { EnvironmentSystemVariables } from './environment.types';
 import { WithPassthrough } from './provider.types';
 import type { Subscriber } from './subscriber.types';
 
@@ -10,6 +12,9 @@ export type Event = {
   state: State[];
   action: Exclude<PostActionEnum, PostActionEnum.TRIGGER>;
   subscriber: Subscriber;
+  context: ContextResolved;
+  /** User-defined env vars merged with environment system variables (name, type). */
+  env: EnvironmentSystemVariables & Record<string, string>;
 };
 
 export type State = {

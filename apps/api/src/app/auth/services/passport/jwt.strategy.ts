@@ -1,10 +1,12 @@
+import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { PassportStrategy } from '@nestjs/passport';
+import { HttpRequestHeaderKeysEnum, Instrument } from '@novu/application-generic';
+import { EnvironmentRepository } from '@novu/dal';
+import { ApiAuthSchemeEnum, UserSessionData } from '@novu/shared';
 import type http from 'http';
 import { ExtractJwt, Strategy } from 'passport-jwt';
-import { PassportStrategy } from '@nestjs/passport';
-import { Injectable, UnauthorizedException } from '@nestjs/common';
-import { AuthService, Instrument, HttpRequestHeaderKeysEnum } from '@novu/application-generic';
-import { ApiAuthSchemeEnum, UserSessionData } from '@novu/shared';
-import { EnvironmentRepository } from '@novu/dal';
+import { AuthService } from '../auth.service';
+import { addNewRelicTraceAttributes } from './newrelic.util';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -21,7 +23,6 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   @Instrument()
   async validate(req: http.IncomingMessage, session: UserSessionData) {
     // Set the scheme to Bearer, meaning the user is authenticated via a JWT coming from Dashboard
-    // eslint-disable-next-line no-param-reassign
     session.scheme = ApiAuthSchemeEnum.BEARER;
 
     const user = await this.authService.validateUser(session);
@@ -31,7 +32,6 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
     const environmentId = this.resolveEnvironmentId(req, session);
 
-    // eslint-disable-next-line no-param-reassign
     session.environmentId = environmentId;
 
     if (session.environmentId) {
@@ -48,14 +48,17 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       }
     }
 
+    addNewRelicTraceAttributes(session);
+
     return session;
   }
 
   @Instrument()
   resolveEnvironmentId(req: http.IncomingMessage, session: UserSessionData) {
-    const environmentIdFromHeader =
-      (req.headers[HttpRequestHeaderKeysEnum.NOVU_ENVIRONMENT_ID.toLowerCase()] as string) || '';
+    const environmentIdHeader = req.headers[HttpRequestHeaderKeysEnum.NOVU_ENVIRONMENT_ID.toLowerCase()];
 
-    return environmentIdFromHeader;
+    const environmentIdFromHeader = Array.isArray(environmentIdHeader) ? environmentIdHeader[0] : environmentIdHeader;
+
+    return environmentIdFromHeader || session.environmentId || '';
   }
 }

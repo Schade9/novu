@@ -1,14 +1,10 @@
 import sinon from 'sinon';
-import { testServer } from '@novu/testing';
 
-import mailin from '../src/main';
-
-before(async () => {
-  await testServer.create(mailin);
-});
+import '../src/main';
+import mailinServer from '../src/server/index';
 
 after(async () => {
-  await testServer.teardown();
+  await new Promise<void>((resolve) => mailinServer.stop(resolve));
 });
 
 afterEach(() => {

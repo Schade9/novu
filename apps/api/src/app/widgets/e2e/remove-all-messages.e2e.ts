@@ -1,12 +1,12 @@
-import axios from 'axios';
-import { MessageRepository, NotificationTemplateEntity, SubscriberRepository } from '@novu/dal';
-import { UserSession } from '@novu/testing';
-import { expect } from 'chai';
-import { ChannelTypeEnum } from '@novu/shared';
 import { Novu } from '@novu/api';
+import { MessageRepository, NotificationTemplateEntity, SubscriberRepository } from '@novu/dal';
+import { ChannelTypeEnum } from '@novu/shared';
+import { UserSession } from '@novu/testing';
+import axios from 'axios';
+import { expect } from 'chai';
 import { initNovuClassSdk } from '../../shared/helpers/e2e/sdk/e2e-sdk.helper';
 
-describe('Remove all messages - /widgets/messages (DELETE) #novu-v1', function () {
+describe('Remove all messages - /widgets/messages (DELETE) #novu-v0', () => {
   const messageRepository = new MessageRepository();
   let session: UserSession;
   let template: NotificationTemplateEntity;
@@ -43,12 +43,12 @@ describe('Remove all messages - /widgets/messages (DELETE) #novu-v1', function (
     subscriberProfile = profile;
   });
 
-  it('should remove all messages', async function () {
-    await novuClient.trigger({ name: template.triggers[0].identifier, to: subscriberId });
-    await novuClient.trigger({ name: template.triggers[0].identifier, to: subscriberId });
-    await novuClient.trigger({ name: template.triggers[0].identifier, to: subscriberId });
+  it('should remove all messages', async () => {
+    await novuClient.trigger({ workflowId: template.triggers[0].identifier, to: subscriberId });
+    await novuClient.trigger({ workflowId: template.triggers[0].identifier, to: subscriberId });
+    await novuClient.trigger({ workflowId: template.triggers[0].identifier, to: subscriberId });
 
-    await session.awaitRunningJobs(template._id);
+    await session.waitForJobCompletion(template._id);
 
     const messagesBefore = await messageRepository.find({
       _environmentId: session.environment._id,
@@ -72,19 +72,19 @@ describe('Remove all messages - /widgets/messages (DELETE) #novu-v1', function (
     expect(messagesAfter.length).to.equal(0);
   });
 
-  it('should remove all messages of a specific feed', async function () {
+  it('should remove all messages of a specific feed', async () => {
     const templateWithFeed = await session.createTemplate({ noFeedId: false });
 
     const _feedId = templateWithFeed?.steps[0]?.template?._feedId;
 
-    await novuClient.trigger({ name: template.triggers[0].identifier, to: subscriberId });
-    await novuClient.trigger({ name: template.triggers[0].identifier, to: subscriberId });
-    await novuClient.trigger({ name: template.triggers[0].identifier, to: subscriberId });
-    await novuClient.trigger({ name: templateWithFeed.triggers[0].identifier, to: subscriberId });
-    await novuClient.trigger({ name: templateWithFeed.triggers[0].identifier, to: subscriberId });
+    await novuClient.trigger({ workflowId: template.triggers[0].identifier, to: subscriberId });
+    await novuClient.trigger({ workflowId: template.triggers[0].identifier, to: subscriberId });
+    await novuClient.trigger({ workflowId: template.triggers[0].identifier, to: subscriberId });
+    await novuClient.trigger({ workflowId: templateWithFeed.triggers[0].identifier, to: subscriberId });
+    await novuClient.trigger({ workflowId: templateWithFeed.triggers[0].identifier, to: subscriberId });
 
-    await session.awaitRunningJobs(templateWithFeed._id);
-    await session.awaitRunningJobs(template._id);
+    await session.waitForJobCompletion(templateWithFeed._id);
+    await session.waitForJobCompletion(template._id);
 
     const messagesBefore = await messageRepository.find({
       _environmentId: session.environment._id,

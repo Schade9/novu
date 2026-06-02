@@ -1,12 +1,12 @@
-[build.environment]
-  DISABLE_ESLINT_PLUGIN="true"
-
 [build]
-  # default build command
   command = "pnpm run build:dashboard --skip-nx-cache"
+
+[build.environment]
+  NODE_OPTIONS="--max_old_space_size=4096"
 
 [context.deploy-preview]
   command = "pnpm run build:dashboard --skip-nx-cache"
+  ignore = "git diff --quiet $CACHED_COMMIT_REF $COMMIT_REF apps/dashboard"
 
 [[redirects]]
   from = "/legacy/*"
@@ -25,6 +25,7 @@
     X-XSS-Protection = "1; mode=block"
     Referrer-Policy = "no-referrer-when-downgrade"
     X-Content-Type-Options = "nosniff"
+    Content-Security-Policy = "frame-ancestors 'none';"
     Permissions-Policy = "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=(), interest-cohort=()"
     Strict-Transport-Security = '''
     max-age=63072000;

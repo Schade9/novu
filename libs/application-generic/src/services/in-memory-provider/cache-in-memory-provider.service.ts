@@ -1,49 +1,43 @@
 import { Logger } from '@nestjs/common';
-
 import { InMemoryProviderService } from './in-memory-provider.service';
-import {
-  InMemoryProviderEnum,
-  InMemoryProviderClient,
-  ScanStream,
-} from './types';
-
-import { GetIsInMemoryClusterModeEnabled } from '../../usecases';
+import { InMemoryProviderClient, InMemoryProviderEnum, ScanStream } from './types';
+import { isClusterModeEnabled } from './utils';
 
 const LOG_CONTEXT = 'CacheInMemoryProviderService';
 
 export class CacheInMemoryProviderService {
   public inMemoryProviderService: InMemoryProviderService;
   public isCluster: boolean;
-  private getIsInMemoryClusterModeEnabled: GetIsInMemoryClusterModeEnabled;
 
   constructor() {
-    this.getIsInMemoryClusterModeEnabled =
-      new GetIsInMemoryClusterModeEnabled();
-
     const provider = this.selectProvider();
     this.isCluster = this.isClusterMode();
 
-    const enableAutoPipelining =
-      process.env.REDIS_CACHE_ENABLE_AUTOPIPELINING === 'true';
+    const enableAutoPipelining = process.env.REDIS_CACHE_ENABLE_AUTOPIPELINING === 'true';
 
-    this.inMemoryProviderService = new InMemoryProviderService(
-      provider,
-      this.isCluster,
-      enableAutoPipelining,
-    );
+    this.inMemoryProviderService = new InMemoryProviderService(provider, this.isCluster, enableAutoPipelining);
   }
 
   /**
    * Rules for the provider selection:
-   * - For our self hosted users we assume all of them have a single node Redis
-   * instance.
-   * - For Novu we will use Elasticache. We fallback to a Redis Cluster configuration
+   * - For self hosted non-enterprise users we use a single node Redis instance.
+   * - For self hosted enterprise users we use Redis Master-Slave architecture by default,
+   *   but allow using Elasticache when it is explicitly configured.
+   * - For Novu cloud we use Elasticache. We fallback to a Redis Cluster configuration
    * if Elasticache not configured properly. That's happening in the provider
    * mapping in the /in-memory-provider/providers/index.ts
    */
   private selectProvider(): InMemoryProviderEnum {
-    if (process.env.IS_SELF_HOSTED) {
+    if (process.env.IS_SELF_HOSTED === 'true' && process.env.NOVU_ENTERPRISE === 'false') {
       return InMemoryProviderEnum.REDIS;
+    }
+
+    if (process.env.IS_SELF_HOSTED === 'true' && process.env.NOVU_ENTERPRISE === 'true') {
+      if (process.env.ELASTICACHE_CLUSTER_SERVICE_HOST && process.env.ELASTICACHE_CLUSTER_SERVICE_PORT) {
+        return InMemoryProviderEnum.ELASTICACHE;
+      }
+
+      return InMemoryProviderEnum.REDIS_MASTER_SLAVE;
     }
 
     return InMemoryProviderEnum.ELASTICACHE;
@@ -54,18 +48,14 @@ export class CacheInMemoryProviderService {
   }
 
   private isClusterMode(): boolean {
-    const isClusterModeEnabled = this.getIsInMemoryClusterModeEnabled.execute();
+    const isEnabled = isClusterModeEnabled();
 
     Logger.log(
-      this.descriptiveLogMessage(
-        `Cluster mode ${
-          isClusterModeEnabled ? 'IS' : 'IS NOT'
-        } enabled for ${LOG_CONTEXT}`,
-      ),
-      LOG_CONTEXT,
+      this.descriptiveLogMessage(`Cluster mode ${isEnabled ? 'IS' : 'IS NOT'} enabled for ${LOG_CONTEXT}`),
+      LOG_CONTEXT
     );
 
-    return isClusterModeEnabled;
+    return isEnabled;
   }
 
   public async initialize(): Promise<void> {
@@ -77,7 +67,7 @@ export class CacheInMemoryProviderService {
   }
 
   public getClientStatus(): string {
-    return this.getClient().status;
+    return this.getClient()?.status || 'disconnected';
   }
 
   public getTtl(): number {
@@ -93,8 +83,7 @@ export class CacheInMemoryProviderService {
   }
 
   public providerInUseIsInClusterMode(): boolean {
-    const providerConfigured =
-      this.inMemoryProviderService.getProvider.configured;
+    const providerConfigured = this.inMemoryProviderService.getProvider.configured;
 
     return this.isCluster || providerConfigured !== InMemoryProviderEnum.REDIS;
   }

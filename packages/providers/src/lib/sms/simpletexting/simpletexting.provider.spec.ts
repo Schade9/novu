@@ -1,7 +1,6 @@
 import { expect, test } from 'vitest';
-import { SimpletextingSmsProvider } from './simpletexting.provider';
-
 import { axiosSpy } from '../../../utils/test/spy-axios';
+import { SimpletextingSmsProvider } from './simpletexting.provider';
 
 test('should trigger SimpletextingSmsProvider library correctly', async () => {
   const { mockPost } = axiosSpy({
@@ -34,7 +33,7 @@ test('should trigger SimpletextingSmsProvider library correctly', async () => {
         'Content-Type': 'application/json',
         Authorization: `Bearer <YOUR_SIMPLETEXTING_APIKEY>`,
       },
-    },
+    }
   );
 
   expect(response).toHaveProperty('id');
@@ -62,7 +61,7 @@ test('should trigger SimpletextingSmsProvider library correctly with _passthroug
           contactPhone: '+22345678902',
         },
       },
-    },
+    }
   );
 
   expect(mockPost).toHaveBeenCalled();
@@ -80,7 +79,7 @@ test('should trigger SimpletextingSmsProvider library correctly with _passthroug
         'Content-Type': 'application/json',
         Authorization: `Bearer <YOUR_SIMPLETEXTING_APIKEY>`,
       },
-    },
+    }
   );
 
   expect(response).toHaveProperty('id');

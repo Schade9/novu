@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react';
-import { PLAIN_SUPPORT_CHAT_APP_ID } from '@/config';
+import { FeatureFlagsKeysEnum } from '@novu/shared';
 import * as Sentry from '@sentry/react';
+import { useEffect } from 'react';
+import { PLAIN_SUPPORT_CHAT_APP_ID } from '@/config';
 import { useAuth } from '@/context/auth/hooks';
+import { useFeatureFlag } from '@/hooks/use-feature-flag';
 
 // Add type declaration for Plain chat widget
 declare global {
@@ -13,20 +15,21 @@ declare global {
   }
 }
 
+let isPlainChatInitialized = false;
+
 export const usePlainChat = () => {
-  const [isFirstRender, setIsFirstRender] = useState(true);
   const { currentUser } = useAuth();
+  const isContextualHelpEnabled = useFeatureFlag(FeatureFlagsKeysEnum.IS_CONTEXTUAL_HELP_DRAWER_ENABLED);
 
   const isLiveChatVisible = currentUser?.servicesHashes?.plain && PLAIN_SUPPORT_CHAT_APP_ID !== undefined;
 
   useEffect(() => {
-    if (isFirstRender && isLiveChatVisible) {
+    if (!isPlainChatInitialized && isLiveChatVisible) {
       try {
         window?.Plain?.init({
           appId: PLAIN_SUPPORT_CHAT_APP_ID,
           hideLauncher: true,
           hideBranding: true,
-          title: 'Chat with us',
           customerDetails: {
             fullName: `${currentUser.firstName} ${currentUser.lastName}`,
             email: currentUser?.email,
@@ -34,18 +37,26 @@ export const usePlainChat = () => {
             externalId: currentUser?._id,
           },
           links: [
-            { icon: 'book', text: 'Documentation', url: 'https://docs.novu.co?utm_campaign=in_app_live_chat' },
-            {
-              icon: 'integration',
-              text: 'Roadmap',
-              url: 'https://roadmap.novu.co/roadmap?utm_campaign=in_app_live_chat',
-            },
-            { icon: 'link', text: 'Changelog', url: 'https://roadmap.novu.co/changelog?utm_campaign=in_app_live_chat' },
             {
               icon: 'email',
               text: 'Contact Sales',
-              url: 'https://notify.novu.co/meetings/novuhq/novu-discovery-session-rr?utm_campaign=in_app_live_chat',
+              url: 'https://cal.com/team/novu/intro?utm_campaign=in_app_live_chat',
             },
+            ...(!isContextualHelpEnabled
+              ? [
+                  { icon: 'book', text: 'Documentation', url: 'https://docs.novu.co?utm_campaign=in_app_live_chat' },
+                  {
+                    icon: 'integration',
+                    text: 'Roadmap',
+                    url: 'https://roadmap.novu.co/roadmap?utm_campaign=in_app_live_chat',
+                  },
+                  {
+                    icon: 'link',
+                    text: 'Changelog',
+                    url: 'https://go.novu.co/changelog?utm_campaign=in_app_live_chat',
+                  },
+                ]
+              : []),
           ],
           theme: 'light',
           style: {
@@ -54,7 +65,7 @@ export const usePlainChat = () => {
             launcherIconColor: '#FFFFFF',
           },
           logo: {
-            url: 'https://dashboard.novu.co/static/images/novu.png',
+            url: 'https://dashboard-v0.novu.co/static/images/novu.png',
             alt: 'Novu Logo',
           },
           chatButtons: [
@@ -129,8 +140,9 @@ export const usePlainChat = () => {
         Sentry.captureException(error);
       }
     }
-    setIsFirstRender(false);
-  }, [isFirstRender, isLiveChatVisible, currentUser]);
+
+    isPlainChatInitialized = true;
+  }, [isLiveChatVisible, currentUser, isContextualHelpEnabled]);
 
   const showPlainLiveChat = () => {
     if (isLiveChatVisible) {

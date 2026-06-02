@@ -1,9 +1,6 @@
-/* eslint-disable global-require */
-import sinon from 'sinon';
+import { ApiServiceLevelEnum, StripeBillingIntervalEnum } from '@novu/shared';
 import { expect } from 'chai';
-import { ApiServiceLevelEnum } from '@novu/shared';
-// eslint-disable-next-line no-restricted-imports
-import { StripeBillingIntervalEnum } from '@novu/ee-billing/src/stripe/types';
+import sinon from 'sinon';
 
 const mockCheckoutSessionCompletedEvent = {
   type: 'checkout.session.completed',
@@ -13,7 +10,7 @@ const mockCheckoutSessionCompletedEvent = {
       object: 'checkout.session',
       amount_subtotal: 270000,
       amount_total: 270000,
-      billing_address_collection: 'auto',
+      billing_address_collection: 'required',
       cancel_url: 'http://localhost:4200/manage-account/billing?result=canceled',
       created: 1728552369,
       currency: 'usd',
@@ -48,9 +45,6 @@ const verifyCustomerMock = {
     subscriptions: {
       data: [{ id: 'subscription_id' }],
     },
-  },
-  adminUser: {
-    _id: 'admin_user_id',
   },
   organization: { _id: 'organization_id', apiServiceLevel: ApiServiceLevelEnum.FREE },
   subscriptions: [

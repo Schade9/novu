@@ -1,5 +1,5 @@
 import { ApiHeaderOptions } from '@nestjs/swagger';
-import { WithRequired, testHttpHeaderEnumValidity } from './utils.types';
+import { testHttpHeaderEnumValidity, WithRequired } from './utils.types';
 
 export enum HttpRequestHeaderKeysEnum {
   AUTHORIZATION = 'Authorization',
@@ -9,8 +9,11 @@ export enum HttpRequestHeaderKeysEnum {
   BAGGAGE = 'Baggage',
   NOVU_ENVIRONMENT_ID = 'Novu-Environment-Id',
   NOVU_API_VERSION = 'Novu-API-Version',
+  NOVU_CLIENT_VERSION = 'Novu-Client-Version',
   NOVU_USER_AGENT = 'Novu-User-Agent',
   BYPASS_TUNNEL_REMINDER = 'Bypass-Tunnel-Reminder',
+  IDEMPOTENCY_KEY = 'Idempotency-Key',
+  NOVU_APPLICATION_IDENTIFIER = 'Novu-Application-Identifier',
 }
 testHttpHeaderEnumValidity(HttpRequestHeaderKeysEnum);
 

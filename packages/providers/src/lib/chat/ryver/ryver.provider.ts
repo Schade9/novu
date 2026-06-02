@@ -1,9 +1,11 @@
 import { ChatProviderIdEnum } from '@novu/shared';
 import {
   ChannelTypeEnum,
-  ISendMessageSuccessResponse,
+  ENDPOINT_TYPES,
   IChatOptions,
   IChatProvider,
+  ISendMessageSuccessResponse,
+  isChannelDataOfType,
 } from '@novu/stateless';
 import axios from 'axios';
 import { BaseProvider, CasingEnum } from '../../../base.provider';
@@ -17,14 +19,19 @@ export class RyverChatProvider extends BaseProvider implements IChatProvider {
 
   async sendMessage(
     options: IChatOptions,
-    bridgeProviderData: WithPassthrough<Record<string, unknown>> = {},
+    bridgeProviderData: WithPassthrough<Record<string, unknown>> = {}
   ): Promise<ISendMessageSuccessResponse> {
-    const url = new URL(options.webhookUrl);
+    if (!isChannelDataOfType(options.channelData, ENDPOINT_TYPES.WEBHOOK)) {
+      throw new Error('Invalid channel data for Ryver provider');
+    }
+
+    const { channelData } = options;
+    const url = new URL(channelData.endpoint.url);
     const response = await this.axiosInstance.post(
       url.toString(),
       this.transform(bridgeProviderData, {
         content: options.content,
-      }).body,
+      }).body
     );
 
     return {

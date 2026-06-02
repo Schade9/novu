@@ -1,17 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  ArrayNotEmpty,
-  IsArray,
-  IsDefined,
-  IsEmail,
-  IsLocale,
-  IsObject,
-  IsOptional,
-  IsString,
-  ValidateNested,
-} from 'class-validator';
-import { ChatProviderIdEnum, IChannelCredentials, PushProviderIdEnum, SubscriberCustomData } from '@novu/shared';
+import { ChatProviderIdEnum, IChannelCredentials, PushProviderIdEnum } from '@novu/shared';
 import { Type } from 'class-transformer';
+import { ArrayNotEmpty, IsArray, IsDefined, IsNotEmpty, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { BaseSubscriberFieldsDto } from '../../shared/dtos/base-subscriber-fields.dto';
 
 export class ChannelCredentialsDto implements IChannelCredentials {
   @ApiPropertyOptional({
@@ -54,73 +45,17 @@ export class SubscriberChannelDto {
   credentials: ChannelCredentialsDto;
 }
 
-export class CreateSubscriberRequestDto {
+export class CreateSubscriberRequestDto extends BaseSubscriberFieldsDto {
   @ApiProperty({
     description:
       'The internal identifier you used to create this subscriber, usually correlates to the id the user in your systems',
   })
   @IsString()
   @IsDefined()
+  @IsNotEmpty({
+    message: 'SubscriberId is required',
+  })
   subscriberId: string;
-
-  @ApiPropertyOptional({
-    description: 'The email address of the subscriber.',
-  })
-  @IsEmail()
-  @IsOptional()
-  email?: string;
-
-  @ApiPropertyOptional({
-    description: 'The first name of the subscriber.',
-  })
-  @IsString()
-  @IsOptional()
-  firstName?: string;
-
-  @ApiPropertyOptional({
-    description: 'The last name of the subscriber.',
-  })
-  @IsString()
-  @IsOptional()
-  lastName?: string;
-
-  @ApiPropertyOptional({
-    description: 'The phone number of the subscriber.',
-  })
-  @IsString()
-  @IsOptional()
-  phone?: string;
-
-  @ApiPropertyOptional({
-    description: 'An HTTP URL to the profile image of your subscriber.',
-  })
-  @IsString()
-  @IsOptional()
-  avatar?: string;
-
-  @ApiPropertyOptional({
-    description: 'The locale of the subscriber.',
-  })
-  @IsLocale()
-  @IsOptional()
-  locale?: string;
-
-  @ApiPropertyOptional({
-    type: 'object',
-    description: 'An optional payload object that can contain any properties.',
-    required: false,
-    additionalProperties: {
-      oneOf: [
-        { type: 'string' },
-        { type: 'array', items: { type: 'string' } },
-        { type: 'boolean' },
-        { type: 'number' },
-      ],
-    },
-  })
-  @IsOptional()
-  @IsObject()
-  data?: SubscriberCustomData;
 
   @ApiPropertyOptional({
     type: [SubscriberChannelDto],

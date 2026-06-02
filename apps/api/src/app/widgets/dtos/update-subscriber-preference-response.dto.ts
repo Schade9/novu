@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  CustomDataType,
   INotificationTrigger,
   INotificationTriggerVariable,
   ITemplateConfiguration,
@@ -8,7 +9,7 @@ import {
   TriggerContextTypeEnum,
   TriggerTypeEnum,
 } from '@novu/shared';
-import { PreferenceChannels } from '../../shared/dtos/preference-channels';
+import { SubscriberPreferenceChannels } from '../../shared/dtos/preference-channels';
 
 class Preference {
   @ApiProperty({
@@ -18,10 +19,10 @@ class Preference {
   enabled: boolean;
 
   @ApiProperty({
-    type: PreferenceChannels,
+    type: SubscriberPreferenceChannels,
     description: 'Subscriber preferences for the different channels regarding this workflow',
   })
-  channels: PreferenceChannels;
+  channels: SubscriberPreferenceChannels;
 }
 
 export class NotificationTriggerVariableResponse implements INotificationTriggerVariable {
@@ -119,6 +120,24 @@ class TemplateResponse implements ITemplateConfiguration {
     type: [NotificationTriggerResponse], // Use an array syntax
   })
   triggers: NotificationTriggerResponse[];
+
+  @ApiProperty({
+    description: 'Tags applied to the workflow.',
+    type: [String],
+  })
+  tags?: string[];
+
+  @ApiProperty({
+    description: 'The custom data of the workflow.',
+    type: Object,
+  })
+  data?: CustomDataType;
+
+  @ApiPropertyOptional({
+    description: "The date and time the workflow was last updated. It's in ISO 8601 format.",
+    type: String,
+  })
+  updatedAt?: string;
 }
 export class UpdateSubscriberPreferenceResponseDto {
   @ApiProperty({

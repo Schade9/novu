@@ -1,8 +1,15 @@
+import {
+  ResourceOriginEnum,
+  RuntimeIssue,
+  SeverityLevelEnum,
+  Slug,
+  StepTypeEnum,
+  WorkflowCreationSourceEnum,
+  WorkflowPreferences,
+} from '@novu/shared';
 import type { JSONSchemaDto } from './json-schema-dto';
-import { Slug } from '../../types/utils';
-import { StepTypeEnum, WorkflowCreationSourceEnum, WorkflowOriginEnum, WorkflowPreferences } from '../../types';
+import { StepCreateDto, StepListResponseDto, StepResponseDto, StepUpdateDto } from './step.dto';
 import { WorkflowStatusEnum } from './workflow-status-enum';
-import { StepCreateDto, StepResponseDto, StepUpdateDto } from './step.dto';
 
 export class ControlsSchema {
   schema: JSONSchemaDto;
@@ -13,6 +20,9 @@ export type PatchWorkflowDto = {
   name?: string;
   description?: string;
   tags?: string[];
+  payloadSchema?: object;
+  validatePayload?: boolean;
+  isTranslationEnabled?: boolean;
 };
 
 export type ListWorkflowResponse = {
@@ -22,9 +32,20 @@ export type ListWorkflowResponse = {
 
 export type WorkflowListResponseDto = Pick<
   WorkflowResponseDto,
-  'name' | 'tags' | 'updatedAt' | 'createdAt' | '_id' | 'workflowId' | 'slug' | 'status' | 'origin'
+  | 'name'
+  | 'tags'
+  | 'updatedAt'
+  | 'createdAt'
+  | '_id'
+  | 'workflowId'
+  | 'slug'
+  | 'status'
+  | 'origin'
+  | 'lastTriggeredAt'
+  | 'isTranslationEnabled'
 > & {
   stepTypeOverviews: StepTypeEnum[];
+  steps: StepListResponseDto[];
 };
 
 export type WorkflowCommonsFields = {
@@ -32,6 +53,9 @@ export type WorkflowCommonsFields = {
   description?: string;
   tags?: string[];
   active?: boolean;
+  validatePayload?: boolean;
+  isTranslationEnabled?: boolean;
+  severity?: SeverityLevelEnum;
 };
 
 export type PreferencesResponseDto = {
@@ -51,17 +75,17 @@ export type WorkflowResponseDto = WorkflowCommonsFields & {
   updatedAt: string;
   createdAt: string;
   steps: StepResponseDto[];
-  origin: WorkflowOriginEnum;
+  origin: ResourceOriginEnum;
   preferences: PreferencesResponseDto;
   status: WorkflowStatusEnum;
-  issues?: Record<WorkflowCreateAndUpdateKeys, RuntimeIssueDto>;
+  issues?: Record<WorkflowCreateAndUpdateKeys, RuntimeIssue>;
+  lastTriggeredAt?: string;
+  payloadSchema?: Record<string, any>;
+  payloadExample?: object;
 };
+
 export type WorkflowCreateAndUpdateKeys = keyof CreateWorkflowDto | keyof UpdateWorkflowDto;
-export class RuntimeIssueDto {
-  issueType: WorkflowIssueTypeEnum;
-  variableName?: string;
-  message: string;
-}
+
 export enum WorkflowIssueTypeEnum {
   MISSING_VALUE = 'MISSING_VALUE',
   MAX_LENGTH_ACCESSED = 'MAX_LENGTH_ACCESSED',
@@ -78,6 +102,8 @@ export type CreateWorkflowDto = WorkflowCommonsFields & {
   __source: WorkflowCreationSourceEnum;
 
   preferences?: PreferencesRequestDto;
+
+  payloadSchema?: object;
 };
 
 export type UpdateWorkflowDto = WorkflowCommonsFields & {
@@ -90,7 +116,9 @@ export type UpdateWorkflowDto = WorkflowCommonsFields & {
 
   preferences: PreferencesRequestDto;
 
-  origin: WorkflowOriginEnum;
+  origin: ResourceOriginEnum;
+
+  payloadSchema?: object;
 };
 
 export type UpsertWorkflowBody = Omit<UpdateWorkflowDto, 'steps'> & {
@@ -100,6 +128,10 @@ export type UpsertWorkflowBody = Omit<UpdateWorkflowDto, 'steps'> & {
 export type UpsertStepBody = StepCreateBody | UpdateStepBody;
 export type StepCreateBody = StepCreateDto;
 export type UpdateStepBody = StepUpdateDto;
+
+export type DuplicateWorkflowDto = Pick<CreateWorkflowDto, 'name' | 'tags' | 'description' | 'isTranslationEnabled'> & {
+  workflowId?: string;
+};
 
 export function isStepCreateBody(step: UpsertStepBody): step is StepCreateDto {
   return step && typeof step === 'object' && !(step as UpdateStepBody)._id;

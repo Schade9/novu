@@ -1,9 +1,9 @@
-/* eslint-disable global-require */
-import sinon from 'sinon';
-import { expect } from 'chai';
-import { EnvironmentRepository, NotificationRepository, CommunityOrganizationRepository } from '@novu/dal';
-import { UserSession } from '@novu/testing';
+import { PinoLogger } from '@novu/application-generic';
+import { CommunityOrganizationRepository, EnvironmentRepository, NotificationRepository } from '@novu/dal';
 import { ApiServiceLevelEnum, isClerkEnabled } from '@novu/shared';
+import { UserSession } from '@novu/testing';
+import { expect } from 'chai';
+import sinon from 'sinon';
 
 describe('GetPlatformNotificationUsage #novu-v2', () => {
   const eeBilling = require('@novu/ee-billing');
@@ -17,16 +17,39 @@ describe('GetPlatformNotificationUsage #novu-v2', () => {
   const notificationRepo = new NotificationRepository();
   const communityOrganizationRepo = new CommunityOrganizationRepository();
 
-  const createUseCase = () => {
-    const useCase = new GetPlatformNotificationUsage(environmentRepo, notificationRepo, communityOrganizationRepo);
+  const mockWorkflowRunRepository = {
+    getPlatformUsageByDateRange: sinon.stub().resolves([]),
+  };
 
-    return useCase;
+  const mockFeatureFlagsService = {
+    getFlag: sinon.stub().resolves(false),
+  };
+
+  const mockCacheService = {
+    cacheEnabled: sinon.stub().returns(false),
+    get: sinon.stub().resolves(undefined),
+  };
+
+  const createUseCase = () => {
+    return new GetPlatformNotificationUsage(
+      mockWorkflowRunRepository,
+      environmentRepo,
+      notificationRepo,
+      communityOrganizationRepo,
+      mockFeatureFlagsService,
+      mockCacheService,
+      new PinoLogger({})
+    );
   };
   let session: UserSession;
 
   beforeEach(async () => {
     session = new UserSession();
     await session.initialize();
+    mockWorkflowRunRepository.getPlatformUsageByDateRange.reset();
+    mockWorkflowRunRepository.getPlatformUsageByDateRange.resolves([]);
+    mockFeatureFlagsService.getFlag.reset();
+    mockFeatureFlagsService.getFlag.resolves(false);
   });
 
   it(`should return an empty array when there is no recorded usage`, async () => {

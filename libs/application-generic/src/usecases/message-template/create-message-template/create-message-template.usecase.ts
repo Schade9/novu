@@ -1,22 +1,12 @@
-import { Injectable } from '@nestjs/common';
-import {
-  MessageTemplateEntity,
-  MessageTemplateRepository,
-  LayoutRepository,
-} from '@novu/dal';
-import {
-  ChangeEntityTypeEnum,
-  IMessageAction,
-  isBridgeWorkflow,
-  StepTypeEnum,
-} from '@novu/shared';
-
-import { CreateMessageTemplateCommand } from './create-message-template.command';
+import { BadRequestException, Injectable } from '@nestjs/common';
+import { LayoutRepository, MessageTemplateEntity, MessageTemplateRepository } from '@novu/dal';
+import { ChangeEntityTypeEnum, IMessageAction, isBridgeWorkflow, StepTypeEnum } from '@novu/shared';
+import { sanitizeMessageContentV0 } from '../../../services';
+import { normalizeVariantDefault } from '../../../utils/variants';
 import { CreateChange, CreateChangeCommand } from '../../create-change';
 import { UpdateChange, UpdateChangeCommand } from '../../update-change';
-import { sanitizeMessageContent } from '../../../services';
-import { normalizeVariantDefault } from '../../../utils/variants';
-import { ApiException } from '../../../utils/exceptions';
+import { shouldSanitize } from '../shared';
+import { CreateMessageTemplateCommand } from './create-message-template.command';
 
 @Injectable()
 export class CreateMessageTemplate {
@@ -24,38 +14,30 @@ export class CreateMessageTemplate {
     private messageTemplateRepository: MessageTemplateRepository,
     private layoutRepository: LayoutRepository,
     private createChange: CreateChange,
-    private updateChange: UpdateChange,
+    private updateChange: UpdateChange
   ) {}
 
-  async execute(
-    command: CreateMessageTemplateCommand,
-  ): Promise<MessageTemplateEntity> {
+  async execute(command: CreateMessageTemplateCommand): Promise<MessageTemplateEntity> {
     if ((command?.cta?.action as IMessageAction | undefined | '') === '') {
-      throw new ApiException('Please provide a valid CTA action');
+      throw new BadRequestException('Please provide a valid CTA action');
     }
 
     let layoutId: string | undefined | null;
     if (command.type === StepTypeEnum.EMAIL && !command.layoutId) {
-      const defaultLayout = await this.layoutRepository.findDefault(
-        command.environmentId,
-        command.organizationId,
-      );
+      const defaultLayout = await this.layoutRepository.findDefault(command.environmentId, command.organizationId);
       layoutId = defaultLayout?._id;
     } else {
       layoutId = command.layoutId;
     }
 
-    let item: MessageTemplateEntity =
-      await this.messageTemplateRepository.create({
+    let item: MessageTemplateEntity = await this.messageTemplateRepository.create(
+      {
         cta: command.cta,
         name: command.name,
-        variables: command.variables
-          ? normalizeVariantDefault(command.variables)
-          : undefined,
-        content:
-          command.contentType === 'editor'
-            ? sanitizeMessageContent(command.content)
-            : command.content,
+        variables: command.variables ? normalizeVariantDefault(command.variables) : undefined,
+        content: shouldSanitize(command.type, command.contentType)
+          ? sanitizeMessageContentV0(command.content)
+          : command.content,
         contentType: command.contentType,
         subject: command.subject,
         title: command.title,
@@ -71,7 +53,9 @@ export class CreateMessageTemplate {
         output: command.output,
         actor: command.actor,
         code: command.code,
-      });
+      },
+      command.session ? { session: command.session } : {}
+    );
 
     if (item?._id) {
       item = (await this.messageTemplateRepository.findOne({
@@ -80,7 +64,7 @@ export class CreateMessageTemplate {
       })) as MessageTemplateEntity;
     }
 
-    if (!isBridgeWorkflow(command.workflowType)) {
+    if (!isBridgeWorkflow(command.workflowType) && item._id) {
       await this.createChange.execute(
         CreateChangeCommand.create({
           organizationId: command.organizationId,
@@ -90,7 +74,7 @@ export class CreateMessageTemplate {
           type: ChangeEntityTypeEnum.MESSAGE_TEMPLATE,
           parentChangeId: command.parentChangeId,
           changeId: MessageTemplateRepository.createObjectId(),
-        }),
+        })
       );
     }
 
@@ -103,7 +87,7 @@ export class CreateMessageTemplate {
           environmentId: command.environmentId,
           organizationId: command.organizationId,
           userId: command.userId,
-        }),
+        })
       );
     }
 
@@ -116,7 +100,7 @@ export class CreateMessageTemplate {
           environmentId: command.environmentId,
           organizationId: command.organizationId,
           userId: command.userId,
-        }),
+        })
       );
     }
 

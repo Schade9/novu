@@ -1,12 +1,15 @@
-import { UiSchemaGroupEnum } from '@novu/shared';
-import { getComponentByType } from '@/components/workflow-editor/steps/component-utils';
-import { SidebarContent } from '@/components/side-navigation/sidebar';
+import { UiComponentEnum, UiSchemaGroupEnum } from '@novu/shared';
 import { Separator } from '@/components/primitives/separator';
+import { SidebarContent } from '@/components/side-navigation/sidebar';
+import { getComponentByType } from '@/components/workflow-editor/steps/component-utils';
 import { useWorkflow } from '@/components/workflow-editor/workflow-provider';
 
+const typeKey = 'type';
 const amountKey = 'amount';
 const unitKey = 'unit';
-const typeKey = 'type';
+const cronKey = 'cron';
+const dynamicKeyKey = 'dynamicKey';
+const extendToScheduleKey = 'extendToSchedule';
 
 export const DelayControlValues = () => {
   const { workflow, step } = useWorkflow();
@@ -16,13 +19,29 @@ export const DelayControlValues = () => {
     return null;
   }
 
-  const { [amountKey]: amount, [typeKey]: type, [unitKey]: unit } = uiSchema.properties ?? {};
+  const {
+    [typeKey]: type,
+    [amountKey]: amount,
+    [unitKey]: unit,
+    [cronKey]: cron,
+    [dynamicKeyKey]: dynamicKey,
+    [extendToScheduleKey]: extendToSchedule,
+  } = uiSchema.properties ?? {};
 
   return (
     <>
-      {amount && type && unit && (
+      {(type || amount || unit || cron || dynamicKey) && (
         <>
-          <SidebarContent>{getComponentByType({ component: amount.component })}</SidebarContent>
+          <SidebarContent size="lg">
+            {getComponentByType({
+              component:
+                type?.component || amount?.component || unit?.component || cron?.component || dynamicKey?.component,
+            })}
+          </SidebarContent>
+          <Separator />
+          <SidebarContent>
+            {getComponentByType({ component: extendToSchedule?.component ?? UiComponentEnum.EXTEND_TO_SCHEDULE })}
+          </SidebarContent>
           <Separator />
         </>
       )}

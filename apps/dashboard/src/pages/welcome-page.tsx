@@ -1,11 +1,10 @@
-import { ReactElement, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { PageMeta } from '../components/page-meta';
-import { DashboardLayout } from '../components/dashboard-layout';
-import { ProgressSection } from '../components/welcome/progress-section';
-import { ResourcesList } from '../components/welcome/resources-list';
+import { ReactElement, useEffect } from 'react';
 import { RiBookletFill, RiBookmark2Fill } from 'react-icons/ri';
-import { Resource } from '../components/welcome/resources-list';
+import { DashboardLayout } from '../components/dashboard-layout';
+import { PageMeta } from '../components/page-meta';
+import { ProgressSection } from '../components/welcome/progress-section';
+import { Resource, ResourcesList } from '../components/welcome/resources-list';
 import { useTelemetry } from '../hooks/use-telemetry';
 import { TelemetryEvent } from '../utils/telemetry';
 
@@ -16,9 +15,9 @@ const helpfulResources: Resource[] = [
     url: 'https://docs.novu.co/',
   },
   {
-    title: 'Join our community on Discord',
-    image: 'discord.svg',
-    url: 'https://discord.gg/novu',
+    title: 'Install Novu MCP',
+    image: 'mcp.svg',
+    url: 'https://docs.novu.co/platform/additional-resources/mcp',
   },
   {
     title: 'See our code on GitHub',
@@ -37,25 +36,25 @@ const learnResources: Resource[] = [
     title: 'Manage Subscribers',
     duration: '4m read',
     image: 'subscribers.svg',
-    url: 'https://docs.novu.co/concepts/subscribers?utm_source=novu.co&utm_medium=welcome-page',
+    url: 'https://docs.novu.co/platform/concepts/subscribers?utm_source=novu.co&utm_medium=welcome-page',
   },
   {
     title: 'Topics',
     duration: '5m read',
     image: 'topics.svg',
-    url: 'https://docs.novu.co/concepts/topics?utm_source=novu.co&utm_medium=welcome-page',
+    url: 'https://docs.novu.co/platform/concepts/topics?utm_source=novu.co&utm_medium=welcome-page',
   },
   {
     title: 'Code First Workflows',
     duration: '4m read',
     image: 'code-first.svg',
-    url: 'https://docs.novu.co/workflow/introduction?utm_source=novu.co&utm_medium=welcome-page',
+    url: 'https://docs.novu.co/framework/introduction?utm_source=novu.co&utm_medium=welcome-page',
   },
   {
     title: 'Digest Engine',
     duration: '3m read',
     image: 'digest engine-1.svg',
-    url: 'https://docs.novu.co/workflow/digest?utm_source=novu.co&utm_medium=welcome-page',
+    url: 'https://docs.novu.co/platform/workflow/digest?utm_source=novu.co&utm_medium=welcome-page',
   },
 ];
 
@@ -93,7 +92,7 @@ export function WelcomePage(): ReactElement {
     <>
       <PageMeta title="Get Started with Novu" />
       <DashboardLayout>
-        <motion.div className="flex flex-col gap-8 p-9 pt-6" variants={pageVariants} initial="hidden" animate="show">
+        <motion.div className="flex flex-col gap-6 p-4 pt-2 md:gap-8 md:p-9 md:pt-4" variants={pageVariants} initial="hidden" animate="show">
           <motion.div variants={sectionVariants}>
             <ProgressSection />
           </motion.div>

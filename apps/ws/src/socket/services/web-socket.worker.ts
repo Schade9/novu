@@ -4,6 +4,8 @@ import {
   BullMqService,
   getWebSocketWorkerOptions,
   IWebSocketDataDto,
+  PinoLogger,
+  SqsService,
   WebSocketsWorkerService,
   WorkerOptions,
   WorkflowInMemoryProviderService,
@@ -20,52 +22,55 @@ const LOG_CONTEXT = 'WebSocketWorker';
 export class WebSocketWorker extends WebSocketsWorkerService {
   constructor(
     private externalServicesRoute: ExternalServicesRoute,
-    private workflowInMemoryProviderService: WorkflowInMemoryProviderService
+    private workflowInMemoryProviderService: WorkflowInMemoryProviderService,
+    sqsService: SqsService,
+    logger: PinoLogger
   ) {
-    super(new BullMqService(workflowInMemoryProviderService));
+    super(new BullMqService(workflowInMemoryProviderService), sqsService, logger);
 
     this.initWorker(this.getWorkerProcessor(), this.getWorkerOpts());
   }
 
   private getWorkerProcessor() {
     return async (job) => {
-      return new Promise((resolve, reject) => {
+      return new Promise<void>((resolve, reject) => {
         const _this = this;
 
-        Logger.log(`Job ${job.id} / ${job.data.event} is being processed WebSocketWorker`, LOG_CONTEXT);
+        const { data: jobData } = job;
 
-        nr.startBackgroundTransaction(
-          ObservabilityBackgroundTransactionEnum.WS_SOCKET_QUEUE,
-          'WS Service',
-          function () {
-            const transaction = nr.getTransaction();
-            const { data: jobData } = job;
-            const data: IWebSocketDataDto = jobData;
+        // Skip processing if marked (for shadow/live modes)
+        if (jobData.skipProcessing) {
+          Logger.log(`Skipping job ${job.id} - skipProcessing flag is set`, LOG_CONTEXT);
+          resolve();
+          return;
+        }
 
-            _this.externalServicesRoute
-              .execute(
-                ExternalServicesRouteCommand.create({
-                  userId: data.userId,
-                  event: data.event,
-                  payload: data.payload,
-                  _environmentId: data._environmentId,
-                })
-              )
-              .then(resolve)
-              .catch((error) => {
-                Logger.error(
-                  error,
-                  'Unexpected exception occurred while handling external services route ',
-                  LOG_CONTEXT
-                );
+        Logger.log(`Job ${job.id} / ${jobData.event} is being processed WebSocketWorker`, LOG_CONTEXT);
 
-                reject(error);
+        nr.startBackgroundTransaction(ObservabilityBackgroundTransactionEnum.WS_SOCKET_QUEUE, 'WS Service', () => {
+          const transaction = nr.getTransaction();
+          const data: IWebSocketDataDto = jobData;
+
+          _this.externalServicesRoute
+            .execute(
+              ExternalServicesRouteCommand.create({
+                userId: data.userId,
+                event: data.event,
+                payload: data.payload,
+                _environmentId: data._environmentId,
+                contextKeys: data.contextKeys ?? [],
               })
-              .finally(() => {
-                transaction.end();
-              });
-          }
-        );
+            )
+            .then(() => resolve())
+            .catch((error) => {
+              Logger.error(error, 'Unexpected exception occurred while handling external services route ', LOG_CONTEXT);
+
+              reject(error);
+            })
+            .finally(() => {
+              transaction.end();
+            });
+        });
       });
     };
   }

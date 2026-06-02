@@ -1,3 +1,102 @@
+## 2.10.0 (2026-03-27)
+
+### 🚀 Features
+
+- **framework:** export param types fixes NV-7261 ([#10407](https://github.com/novuhq/novu/pull/10407))
+- **novu,framework:** align step resolver handlers with framework steps fixes NV-7235 ([#10286](https://github.com/novuhq/novu/pull/10286))
+- **api-service,dashboard,framework:** align step resolver scaffolding with framework fixes NV-7116 ([#10136](https://github.com/novuhq/novu/pull/10136))
+
+### 🩹 Fixes
+
+- **framework:** disable AJV strict mode for user schemas and remove noisy console.error ([#10426](https://github.com/novuhq/novu/pull/10426))
+- **framework:** Liquid output escaping for special JSON characters including `"` ([#9730](https://github.com/novuhq/novu/pull/9730))
+- **framework:** repair invalid JSON strings in control data fixes NV-6904 ([#9632](https://github.com/novuhq/novu/pull/9632))
+- **framework:** fix CORS issue preventing flows from showing in local studio fixes NV-6945 ([#9626](https://github.com/novuhq/novu/pull/9626))
+- **framework:** security patch for next.js dependency ([#9753](https://github.com/novuhq/novu/pull/9753))
+- **root:** resolve high liquidjs vulnerability ([#10263](https://github.com/novuhq/novu/pull/10263))
+- **root:** resolve moderate lodash, ajv, and express vulnerabilities ([#10360](https://github.com/novuhq/novu/pull/10360))
+
+### ❤️ Thank You
+
+- Adam Chmara @ChmaraX
+- Dima Grossman @scopsy
+- George Djabarov @djabarovgeorge
+
+## 2.9.0 (2025-12-02)
+
+### 🚀 Features
+
+- **api,framework:** translations - support liquid filters & nesting fixes NV-6870 ([#9575](https://github.com/novuhq/novu/pull/9575))
+
+### 🩹 Fixes
+
+- **worker:** sanitize img tags to prevent xss fixes NV-6883 ([#9483](https://github.com/novuhq/novu/pull/9483))
+
+### ❤️ Thank You
+
+- Adam Chmara @ChmaraX
+- Dima Grossman @scopsy
+
+## 2.6.6 (2025-02-25)
+
+### 🚀 Features
+
+- **api-service:** system limits & update pricing pages ([#7718](https://github.com/novuhq/novu/pull/7718))
+- **root:** add no only github action ([#7692](https://github.com/novuhq/novu/pull/7692))
+
+### 🩹 Fixes
+
+- **root:** unhandled promise reject and undefined ff kind ([#7732](https://github.com/novuhq/novu/pull/7732))
+- **api-service:** remove only on e2e ([#7691](https://github.com/novuhq/novu/pull/7691))
+
+### ❤️ Thank You
+
+- GalTidhar @tatarco
+- George Djabarov @djabarovgeorge
+
+
+## 2.6.5 (2025-02-07)
+
+### 🚀 Features
+
+- Update README.md ([bb63172dd](https://github.com/novuhq/novu/commit/bb63172dd))
+- **readme:** Update README.md ([955cbeab0](https://github.com/novuhq/novu/commit/955cbeab0))
+- **dashboard:** Digest liquid helper and popover handler ([#7439](https://github.com/novuhq/novu/pull/7439))
+- quick start updates readme ([88b3b6628](https://github.com/novuhq/novu/commit/88b3b6628))
+- **readme:** update readme ([e5ea61812](https://github.com/novuhq/novu/commit/e5ea61812))
+- **api-service:** add internal sdk ([#7599](https://github.com/novuhq/novu/pull/7599))
+- **dashboard:** step conditions editor ui ([#7502](https://github.com/novuhq/novu/pull/7502))
+- **api:** add query parser ([#7267](https://github.com/novuhq/novu/pull/7267))
+- **api:** Nv 5033 additional removal cycle found unneeded elements ([#7283](https://github.com/novuhq/novu/pull/7283))
+- **api:** Nv 4966 e2e testing happy path - messages ([#7248](https://github.com/novuhq/novu/pull/7248))
+- **dashboard:** Implement email step editor & mini preview ([#7129](https://github.com/novuhq/novu/pull/7129))
+- **api:** converted bulk trigger to use SDK ([#7166](https://github.com/novuhq/novu/pull/7166))
+- **application-generic:** add SUBSCRIBER_WIDGET_JWT_EXPIRATION_TIME env variable ([#7105](https://github.com/novuhq/novu/pull/7105))
+
+### 🩹 Fixes
+
+- **js:** Await read action in Inbox ([#7653](https://github.com/novuhq/novu/pull/7653))
+- **api:** duplicated subscribers created due to race condition ([#7646](https://github.com/novuhq/novu/pull/7646))
+- **api-service:** add missing environment variable ([#7553](https://github.com/novuhq/novu/pull/7553))
+- **api:** Fix failing API e2e tests ([78c385ec7](https://github.com/novuhq/novu/commit/78c385ec7))
+- **api-service:** E2E improvements ([#7461](https://github.com/novuhq/novu/pull/7461))
+- **novu:** automatically create indexes on startup ([#7431](https://github.com/novuhq/novu/pull/7431))
+- **api:** @novu/api -> @novu/api-service ([#7348](https://github.com/novuhq/novu/pull/7348))
+- **framework:** Remove @novu/shared dependency temporarily ([#7337](https://github.com/novuhq/novu/pull/7337))
+
+### ❤️ Thank You
+
+- Aminul Islam @AminulBD
+- Dima Grossman @scopsy
+- GalTidhar @tatarco
+- George Desipris @desiprisg
+- George Djabarov @djabarovgeorge
+- Lucky @L-U-C-K-Y
+- Pawan Jain
+- Paweł Tymczuk @LetItRock
+- Sokratis Vidros @SokratisVidros
+
+
 ## 2.5.3 (2024-12-24)
 
 ### 🩹 Fixes

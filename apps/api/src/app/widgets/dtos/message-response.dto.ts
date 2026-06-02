@@ -1,4 +1,5 @@
 import { ApiExtraModels, ApiProperty, ApiPropertyOptional, getSchemaPath } from '@nestjs/swagger';
+import { SubscriberResponseDto } from '@novu/application-generic';
 import {
   ButtonTypeEnum,
   ChannelCTATypeEnum,
@@ -10,8 +11,7 @@ import {
   MessageActionStatusEnum,
   TextAlignEnum,
 } from '@novu/shared';
-import { SubscriberResponseDto } from '../../subscribers/dtos';
-import { WorkflowResponse } from '../../workflows-v1/dto/workflow-response.dto';
+import { WorkflowResponse } from '../../workflows-v1/dtos/workflow-response.dto';
 
 class EmailBlockStyles {
   @ApiProperty({
@@ -52,7 +52,8 @@ export class EmailBlock {
 class MessageActionResult {
   @ApiPropertyOptional({
     description: 'Payload of the action result',
-    type: Object,
+    type: 'object',
+    additionalProperties: true,
   })
   payload?: Record<string, unknown>;
 
@@ -123,7 +124,7 @@ export class MessageCTA implements IMessageCTA {
   })
   type: ChannelCTATypeEnum;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     description: 'Data associated with the call to action',
     type: MessageCTAData,
   })
@@ -144,7 +145,8 @@ export class MessageResponseDto implements IMessage {
   })
   _id: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
+    nullable: true,
     type: String,
     description: 'Template ID associated with the message',
   })
@@ -156,7 +158,8 @@ export class MessageResponseDto implements IMessage {
   })
   _environmentId: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
+    nullable: true,
     type: String,
     description: 'Message template ID',
   })
@@ -205,6 +208,13 @@ export class MessageResponseDto implements IMessage {
   createdAt: string;
 
   @ApiPropertyOptional({
+    type: [String],
+    description:
+      'Array of delivery dates for the message, if the message has multiple delivery dates, for example after being snoozed',
+  })
+  deliveredAt?: string[];
+
+  @ApiPropertyOptional({
     type: String,
     description: 'Last seen date of the message, if available',
   })
@@ -216,10 +226,14 @@ export class MessageResponseDto implements IMessage {
   })
   lastReadDate?: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
+    nullable: true,
     oneOf: [
       {
-        $ref: getSchemaPath(EmailBlock),
+        type: 'array',
+        items: {
+          $ref: getSchemaPath(EmailBlock),
+        },
       },
       {
         type: 'string',
@@ -260,6 +274,12 @@ export class MessageResponseDto implements IMessage {
     description: 'Indicates if the message has been seen',
   })
   seen: boolean;
+
+  @ApiPropertyOptional({
+    type: String,
+    description: 'Date when the message will be unsnoozed',
+  })
+  snoozedUntil?: string;
 
   @ApiPropertyOptional({
     type: String,
@@ -330,15 +350,24 @@ export class MessageResponseDto implements IMessage {
 
   @ApiPropertyOptional({
     description: 'The payload that was used to send the notification trigger',
-    type: Object,
+    type: 'object',
+    additionalProperties: true,
   })
   payload: Record<string, unknown>;
 
   @ApiPropertyOptional({
     description: 'Provider specific overrides used when triggering the notification',
-    type: Object,
+    type: 'object',
+    additionalProperties: true,
   })
   overrides?: Record<string, unknown>;
+
+  @ApiPropertyOptional({
+    type: [String],
+    description: 'Context (single or multi) in which the message was sent',
+    example: ['tenant:org-123', 'region:us-east-1'],
+  })
+  contextKeys?: string[];
 }
 
 export class MessagesResponseDto {

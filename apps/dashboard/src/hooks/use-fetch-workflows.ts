@@ -1,6 +1,7 @@
+import { DirectionEnum } from '@novu/shared';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { getWorkflows } from '@/api/workflows';
 import { QueryKeys } from '@/utils/query-keys';
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useEnvironment } from '../context/environment/hooks';
 
 interface UseWorkflowsParams {
@@ -8,7 +9,9 @@ interface UseWorkflowsParams {
   offset?: number;
   query?: string;
   orderBy?: string;
-  orderDirection?: 'asc' | 'desc';
+  orderDirection?: DirectionEnum;
+  tags?: string[];
+  status?: string[];
 }
 
 export function useFetchWorkflows({
@@ -16,13 +19,20 @@ export function useFetchWorkflows({
   offset = 0,
   query = '',
   orderBy = '',
-  orderDirection = 'desc',
+  orderDirection = DirectionEnum.DESC,
+  tags = [],
+  status = [],
 }: UseWorkflowsParams = {}) {
   const { currentEnvironment } = useEnvironment();
 
   const workflowsQuery = useQuery({
-    queryKey: [QueryKeys.fetchWorkflows, currentEnvironment?._id, { limit, offset, query, orderBy, orderDirection }],
-    queryFn: () => getWorkflows({ environment: currentEnvironment!, limit, offset, query, orderBy, orderDirection }),
+    queryKey: [
+      QueryKeys.fetchWorkflows,
+      currentEnvironment?._id,
+      { limit, offset, query, orderBy, orderDirection, tags, status },
+    ],
+    queryFn: () =>
+      getWorkflows({ environment: currentEnvironment!, limit, offset, query, orderBy, orderDirection, tags, status }),
     placeholderData: keepPreviousData,
     enabled: !!currentEnvironment?._id,
     refetchOnWindowFocus: true,

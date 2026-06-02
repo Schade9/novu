@@ -7,18 +7,31 @@ import {
   Param,
   Post,
   Put,
-  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { ApiExcludeController, ApiExcludeEndpoint, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
-import { Roles, RolesGuard } from '@novu/application-generic';
-import { ApiAuthSchemeEnum, MemberRoleEnum, ProductFeatureKeyEnum, UserSessionData } from '@novu/shared';
+import { ApiExcludeEndpoint, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
+import {
+  FeatureFlagsService,
+  ProductFeature,
+  RequirePermissions,
+  SkipPermissionsCheck,
+} from '@novu/application-generic';
+import { CommunityOrganizationRepository } from '@novu/dal';
+import {
+  ApiServiceLevelEnum,
+  FeatureFlagsKeysEnum,
+  FeatureNameEnum,
+  getFeatureForTierAsBoolean,
+  PermissionsEnum,
+  ProductFeatureKeyEnum,
+  UserSessionData,
+} from '@novu/shared';
+import { ErrorDto } from '../../error-dto';
+import { RequireAuthentication } from '../auth/framework/auth.decorator';
 import { ExternalApiAccessible } from '../auth/framework/external-api.decorator';
-import { ProductFeature } from '../shared/decorators/product-feature.decorator';
 import { ApiKey } from '../shared/dtos/api-key';
 import { ApiCommonResponses, ApiResponse } from '../shared/framework/response.decorator';
-import { UserAuthentication } from '../shared/framework/swagger/api.key.security';
-import { SdkGroupName } from '../shared/framework/swagger/sdk.decorators';
+import { SdkGroupName, SdkMethodName } from '../shared/framework/swagger/sdk.decorators';
 import { UserSession } from '../shared/framework/user.decorator';
 import { CreateEnvironmentRequestDto } from './dtos/create-environment-request.dto';
 import { EnvironmentResponseDto } from './dtos/environment-response.dto';
@@ -42,9 +55,8 @@ import { UpdateEnvironment } from './usecases/update-environment/update-environm
 @ApiCommonResponses()
 @Controller('/environments')
 @UseInterceptors(ClassSerializerInterceptor)
-@UserAuthentication()
+@RequireAuthentication()
 @ApiTags('Environments')
-@ApiExcludeController()
 export class EnvironmentsControllerV1 {
   constructor(
     private createEnvironmentUsecase: CreateEnvironment,
@@ -53,7 +65,9 @@ export class EnvironmentsControllerV1 {
     private regenerateApiKeysUsecase: RegenerateApiKeys,
     private getEnvironmentUsecase: GetEnvironment,
     private getMyEnvironmentsUsecase: GetMyEnvironments,
-    private deleteEnvironmentUsecase: DeleteEnvironment
+    private deleteEnvironmentUsecase: DeleteEnvironment,
+    private organizationRepository: CommunityOrganizationRepository,
+    private featureFlagService: FeatureFlagsService
   ) {}
 
   @Get('/me')
@@ -62,6 +76,8 @@ export class EnvironmentsControllerV1 {
   })
   @ApiResponse(EnvironmentResponseDto)
   @ExternalApiAccessible()
+  @ApiExcludeEndpoint()
+  @SkipPermissionsCheck()
   async getCurrentEnvironment(@UserSession() user: UserSessionData): Promise<EnvironmentResponseDto> {
     return await this.getEnvironmentUsecase.execute(
       GetEnvironmentCommand.create({
@@ -74,17 +90,24 @@ export class EnvironmentsControllerV1 {
 
   @Post('/')
   @ApiOperation({
-    summary: 'Create environment',
+    summary: 'Create an environment',
+    description: `Creates a new environment within the current organization. 
+    Environments allow you to manage different stages of your application development lifecycle.
+    Each environment has its own set of API keys and configurations.`,
   })
-  @ApiExcludeEndpoint()
   @ApiResponse(EnvironmentResponseDto, 201)
+  @ApiResponse(ErrorDto, 402, false, false)
   @ProductFeature(ProductFeatureKeyEnum.MANAGE_ENVIRONMENTS)
-  @UseGuards(RolesGuard)
-  @Roles(MemberRoleEnum.ADMIN)
+  @SdkGroupName('Environments')
+  @SdkMethodName('create')
+  @ExternalApiAccessible()
+  @RequirePermissions(PermissionsEnum.ENVIRONMENT_WRITE)
   async createEnvironment(
     @UserSession() user: UserSessionData,
     @Body() body: CreateEnvironmentRequestDto
   ): Promise<EnvironmentResponseDto> {
+    const canAccessApiKeys = await this.canUserAccessApiKeys(user);
+
     return await this.createEnvironmentUsecase.execute(
       CreateEnvironmentCommand.create({
         name: body.name,
@@ -92,32 +115,47 @@ export class EnvironmentsControllerV1 {
         organizationId: user.organizationId,
         color: body.color,
         system: false,
+        returnApiKeys: canAccessApiKeys,
       })
     );
   }
 
   @Get('/')
   @ApiOperation({
-    summary: 'Get environments',
+    summary: 'List all environments',
+    description: `This API returns a list of environments for the current organization. 
+    Each environment contains its configuration, API keys (if user has access), and metadata.`,
   })
   @ApiResponse(EnvironmentResponseDto, 200, true)
+  @SdkGroupName('Environments')
+  @SdkMethodName('list')
   @ExternalApiAccessible()
+  @SkipPermissionsCheck()
   async listMyEnvironments(@UserSession() user: UserSessionData): Promise<EnvironmentResponseDto[]> {
+    const canAccessApiKeys = await this.canUserAccessApiKeys(user);
+
     return await this.getMyEnvironmentsUsecase.execute(
       GetMyEnvironmentsCommand.create({
         organizationId: user.organizationId,
         environmentId: user.environmentId,
-        includeAllApiKeys: user.scheme === ApiAuthSchemeEnum.BEARER,
+        returnApiKeys: canAccessApiKeys,
+        userId: user._id,
       })
     );
   }
 
   @Put('/:environmentId')
   @ApiOperation({
-    summary: 'Update env by id',
+    summary: 'Update an environment',
+    description: `Update an environment by its unique identifier **environmentId**. 
+    You can modify the environment name, identifier, color, and other configuration settings.`,
   })
-  @ApiExcludeEndpoint()
+  @ApiParam({ name: 'environmentId', description: 'The unique identifier of the environment', type: String })
   @ApiResponse(EnvironmentResponseDto)
+  @SdkGroupName('Environments')
+  @SdkMethodName('update')
+  @ExternalApiAccessible()
+  @RequirePermissions(PermissionsEnum.ENVIRONMENT_WRITE)
   async updateMyEnvironment(
     @UserSession() user: UserSessionData,
     @Param('environmentId') environmentId: string,
@@ -145,6 +183,8 @@ export class EnvironmentsControllerV1 {
   @ApiResponse(ApiKey, 200, true)
   @ExternalApiAccessible()
   @SdkGroupName('Environments.ApiKeys')
+  @ApiExcludeEndpoint()
+  @RequirePermissions(PermissionsEnum.API_KEY_READ)
   async listOrganizationApiKeys(@UserSession() user: UserSessionData): Promise<ApiKey[]> {
     const command = GetApiKeysCommand.create({
       userId: user._id,
@@ -157,8 +197,8 @@ export class EnvironmentsControllerV1 {
 
   @Post('/api-keys/regenerate')
   @ApiResponse(ApiKey, 201, true)
-  @UseGuards(RolesGuard)
-  @Roles(MemberRoleEnum.ADMIN)
+  @ApiExcludeEndpoint()
+  @RequirePermissions(PermissionsEnum.API_KEY_WRITE)
   async regenerateOrganizationApiKeys(@UserSession() user: UserSessionData): Promise<ApiKey[]> {
     const command = GetApiKeysCommand.create({
       userId: user._id,
@@ -171,12 +211,16 @@ export class EnvironmentsControllerV1 {
 
   @Delete('/:environmentId')
   @ApiOperation({
-    summary: 'Delete environment',
+    summary: 'Delete an environment',
+    description: `Delete an environment by its unique identifier **environmentId**. 
+    This action is irreversible and will remove the environment and all its associated data.`,
   })
-  @ApiParam({ name: 'environmentId', type: String, required: true })
+  @ApiParam({ name: 'environmentId', description: 'The unique identifier of the environment', type: String })
   @ProductFeature(ProductFeatureKeyEnum.MANAGE_ENVIRONMENTS)
-  @UseGuards(RolesGuard)
-  @Roles(MemberRoleEnum.ADMIN)
+  @SdkGroupName('Environments')
+  @SdkMethodName('delete')
+  @ExternalApiAccessible()
+  @RequirePermissions(PermissionsEnum.ENVIRONMENT_WRITE)
   async deleteEnvironment(@UserSession() user: UserSessionData, @Param('environmentId') environmentId: string) {
     return await this.deleteEnvironmentUsecase.execute(
       DeleteEnvironmentCommand.create({
@@ -185,5 +229,32 @@ export class EnvironmentsControllerV1 {
         environmentId,
       })
     );
+  }
+
+  private async canUserAccessApiKeys(user: UserSessionData): Promise<boolean> {
+    const organization = await this.organizationRepository.findOne({
+      _id: user.organizationId,
+    });
+
+    const [isRbacFlagEnabled, isRbacFeatureEnabled] = await Promise.all([
+      this.featureFlagService.getFlag({
+        organization: { _id: user.organizationId },
+        user: { _id: user._id },
+        key: FeatureFlagsKeysEnum.IS_RBAC_ENABLED,
+        defaultValue: false,
+      }),
+      getFeatureForTierAsBoolean(
+        FeatureNameEnum.ACCOUNT_ROLE_BASED_ACCESS_CONTROL_BOOLEAN,
+        organization?.apiServiceLevel || ApiServiceLevelEnum.FREE
+      ),
+    ]);
+
+    const isRbacEnabled = isRbacFlagEnabled && isRbacFeatureEnabled;
+
+    if (!isRbacEnabled) {
+      return true;
+    }
+
+    return user.permissions.includes(PermissionsEnum.API_KEY_READ);
   }
 }

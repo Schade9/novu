@@ -1,14 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import {
-  SubscriberEntity,
-  SubscriberRepository,
-  TenantEntity,
-  TenantRepository,
-} from '@novu/dal';
+import { SubscriberEntity, SubscriberRepository, TenantEntity, TenantRepository } from '@novu/dal';
 import { FilterPartTypeEnum, IMessageFilter } from '@novu/shared';
-import { IFilterVariables } from '../../utils/filter-processing-details';
-import { CachedEntity } from '../../services/cache/interceptors/cached-entity.interceptor';
-import { buildSubscriberKey } from '../../services/cache/key-builders/entities';
+import { buildSubscriberKey, CachedResponse } from '../../services';
+import { IFilterVariables } from '../../utils';
 import { ConditionsFilterCommand } from '../conditions-filter';
 
 /**
@@ -26,46 +20,38 @@ import { ConditionsFilterCommand } from '../conditions-filter';
 export class NormalizeVariables {
   constructor(
     private subscriberRepository: SubscriberRepository,
-    private tenantRepository: TenantRepository,
+    private tenantRepository: TenantRepository
   ) {}
 
-  public async execute(command: ConditionsFilterCommand) {
+  public async execute(command: ConditionsFilterCommand): Promise<IFilterVariables> {
     const filterVariables: IFilterVariables = {};
 
-    const combinedFilters = [
-      command.step,
-      ...(command.step?.variants || []),
-    ].flatMap((variant) => (variant?.filters ? variant?.filters : []));
+    const combinedFilters = [command.step, ...(command.step?.variants || [])].flatMap((variant) =>
+      variant?.filters ? variant?.filters : []
+    );
 
-    filterVariables.subscriber = await this.fetchSubscriberIfMissing(
-      command,
-      combinedFilters,
-    );
-    filterVariables.tenant = await this.fetchTenantIfMissing(
-      command,
-      combinedFilters,
-    );
+    filterVariables.subscriber = await this.fetchSubscriberIfMissing(command, combinedFilters);
+    filterVariables.tenant = await this.fetchTenantIfMissing(command, combinedFilters);
     filterVariables.payload = command.variables?.payload
       ? command.variables?.payload
       : (command.job?.payload ?? undefined);
 
     filterVariables.step = command.variables?.step ?? undefined;
     filterVariables.actor = command.variables?.actor ?? undefined;
+    filterVariables.context = command.variables?.context ?? undefined;
 
     return filterVariables;
   }
   private async fetchSubscriberIfMissing(
     command: ConditionsFilterCommand,
-    filters: IMessageFilter[],
+    filters: IMessageFilter[]
   ): Promise<SubscriberEntity | undefined> {
     if (command.variables?.subscriber) {
       return command.variables.subscriber;
     }
 
     const subscriberFilterExist = filters?.find((filter) => {
-      return filter?.children?.find(
-        (item) => item?.on === FilterPartTypeEnum.SUBSCRIBER,
-      );
+      return filter?.children?.find((item) => item?.on === FilterPartTypeEnum.SUBSCRIBER);
     });
 
     if (subscriberFilterExist && command.job) {
@@ -82,20 +68,16 @@ export class NormalizeVariables {
 
   private async fetchTenantIfMissing(
     command: ConditionsFilterCommand,
-    filters: IMessageFilter[],
+    filters: IMessageFilter[]
   ): Promise<TenantEntity | undefined> {
     if (command.variables?.tenant) {
       return command.variables.tenant;
     }
 
     const tenantIdentifier =
-      typeof command.job?.tenant === 'string'
-        ? command.job?.tenant
-        : command.job?.tenant?.identifier;
+      typeof command.job?.tenant === 'string' ? command.job?.tenant : command.job?.tenant?.identifier;
     const tenantFilterExist = filters?.find((filter) => {
-      return filter?.children?.find(
-        (item) => item?.on === FilterPartTypeEnum.TENANT,
-      );
+      return filter?.children?.find((item) => item?.on === FilterPartTypeEnum.TENANT);
     });
 
     if (tenantFilterExist && tenantIdentifier && command.job) {
@@ -110,7 +92,7 @@ export class NormalizeVariables {
     return undefined;
   }
 
-  @CachedEntity({
+  @CachedResponse({
     builder: (command: { subscriberId: string; _environmentId: string }) =>
       buildSubscriberKey({
         _environmentId: command._environmentId,

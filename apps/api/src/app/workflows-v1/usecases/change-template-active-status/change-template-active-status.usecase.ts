@@ -1,13 +1,12 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { ChangeRepository, NotificationTemplateEntity, NotificationTemplateRepository } from '@novu/dal';
-import { ChangeEntityTypeEnum } from '@novu/shared';
 import {
-  buildNotificationTemplateIdentifierKey,
-  buildNotificationTemplateKey,
   CreateChange,
   CreateChangeCommand,
+  computeWorkflowStatus,
   InvalidateCacheService,
 } from '@novu/application-generic';
+import { ChangeRepository, NotificationTemplateEntity, NotificationTemplateRepository } from '@novu/dal';
+import { ChangeEntityTypeEnum } from '@novu/shared';
 
 import { ChangeTemplateActiveStatusCommand } from './change-template-active-status.command';
 
@@ -39,20 +38,6 @@ export class ChangeTemplateActiveStatus {
       throw new BadRequestException('You must provide a different status from the current status');
     }
 
-    await this.invalidateCache.invalidateByKey({
-      key: buildNotificationTemplateKey({
-        _id: command.templateId,
-        _environmentId: command.environmentId,
-      }),
-    });
-
-    await this.invalidateCache.invalidateByKey({
-      key: buildNotificationTemplateIdentifierKey({
-        templateIdentifier: foundTemplate.triggers[0].identifier,
-        _environmentId: command.environmentId,
-      }),
-    });
-
     await this.notificationTemplateRepository.update(
       {
         _id: command.templateId,
@@ -62,6 +47,7 @@ export class ChangeTemplateActiveStatus {
         $set: {
           active: command.active,
           draft: !command.active,
+          status: computeWorkflowStatus(command.active, foundTemplate.steps),
         },
       }
     );

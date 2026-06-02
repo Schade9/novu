@@ -1,13 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
+import { AnalyticsService } from '@novu/application-generic';
 import { OrganizationEntity, UserRepository } from '@novu/dal';
+import { normalizeEmail, SignUpOriginEnum } from '@novu/shared';
 import { hash } from 'bcrypt';
-import { SignUpOriginEnum, normalizeEmail } from '@novu/shared';
-import { AnalyticsService, AuthService, createHash } from '@novu/application-generic';
-
-import { UserRegisterCommand } from './user-register.command';
-import { ApiException } from '../../../shared/exceptions/api.exception';
-import { CreateOrganization } from '../../../organization/usecases/create-organization/create-organization.usecase';
 import { CreateOrganizationCommand } from '../../../organization/usecases/create-organization/create-organization.command';
+import { CreateOrganization } from '../../../organization/usecases/create-organization/create-organization.usecase';
+import { AuthService } from '../../services/auth.service';
+import { UserRegisterCommand } from './user-register.command';
 
 @Injectable()
 export class UserRegister {
@@ -19,11 +18,11 @@ export class UserRegister {
   ) {}
 
   async execute(command: UserRegisterCommand) {
-    if (process.env.DISABLE_USER_REGISTRATION === 'true') throw new ApiException('Account creation is disabled');
+    if (process.env.DISABLE_USER_REGISTRATION === 'true') throw new BadRequestException('Account creation is disabled');
 
     const email = normalizeEmail(command.email);
     const existingUser = await this.userRepository.findByEmail(email);
-    if (existingUser) throw new ApiException('User already exists');
+    if (existingUser) throw new BadRequestException('User already exists');
 
     const passwordHash = await hash(command.password, 10);
     const user = await this.userRepository.create({
@@ -32,19 +31,6 @@ export class UserRegister {
       lastName: command.lastName?.toLowerCase(),
       password: passwordHash,
     });
-
-    if (process.env.INTERCOM_IDENTITY_VERIFICATION_SECRET_KEY) {
-      const intercomSecretKey = process.env.INTERCOM_IDENTITY_VERIFICATION_SECRET_KEY as string;
-      const userHashForIntercom = createHash(intercomSecretKey, user._id);
-      await this.userRepository.update(
-        { _id: user._id },
-        {
-          $set: {
-            'servicesHashes.intercom': userHashForIntercom,
-          },
-        }
-      );
-    }
 
     let organization: OrganizationEntity;
     if (command.organizationName) {

@@ -1,9 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
-import githubPassport from 'passport-github2';
-import { Metadata, StateStoreStoreCallback, StateStoreVerifyCallback } from 'passport-oauth2';
 import { AuthProviderEnum } from '@novu/shared';
-import { AuthService } from '@novu/application-generic';
+import githubPassport from 'passport-github2';
+import { Metadata, StateStoreStoreCallback } from 'passport-oauth2';
+import { AuthService } from '../auth.service';
 
 @Injectable()
 export class GitHubStrategy extends PassportStrategy(githubPassport.Strategy, 'github') {
@@ -15,7 +15,7 @@ export class GitHubStrategy extends PassportStrategy(githubPassport.Strategy, 'g
       scope: ['user:email'],
       passReqToCallback: true,
       store: {
-        verify(req, state: string, meta: Metadata, callback: StateStoreVerifyCallback) {
+        verify(req, state: string, meta: Metadata, callback) {
           callback(null, true, JSON.stringify(req.query));
         },
         store(req, meta: Metadata, callback: StateStoreStoreCallback) {

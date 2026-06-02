@@ -20,35 +20,44 @@ import {
   SignatureNotFoundError,
   SigningKeyNotFoundError,
 } from './errors';
-import type { Awaitable, EventTriggerParams, Workflow } from './types';
-import { initApiClient, createHmacSubtle } from './utils';
 import { isPlatformError } from './errors/guard.errors';
+import type {
+  Agent,
+  AgentActionContext,
+  AgentBridgeRequest,
+  AgentMessageContext,
+  AgentReactionContext,
+  AgentResolveContext,
+  MessageContent,
+} from './resources/agent';
+import { AgentContextImpl, AgentDeliveryError, AgentEventEnum } from './resources/agent';
+import type { Awaitable, EventTriggerParams, Workflow } from './types';
+import { createHmacSubtle, initApiClient } from './utils';
 
-export type ServeHandlerOptions = {
+export interface ServeHandlerOptions {
   client?: Client;
-  workflows: Array<Workflow>;
-};
+  workflows?: Array<Workflow>;
+  agents?: Array<Agent>;
+}
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type INovuRequestHandlerOptions<Input extends any[] = any[], Output = any> = ServeHandlerOptions & {
   frameworkName: string;
   client?: Client;
-  workflows: Array<Workflow>;
+  workflows?: Array<Workflow>;
+  agents?: Array<Agent>;
   handler: Handler<Input, Output>;
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Handler<Input extends any[] = any[], Output = any> = (...args: Input) => HandlerResponse<Output>;
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type HandlerResponse<Output = any> = {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   body: () => Awaitable<any>;
   headers: (key: string) => Awaitable<string | null | undefined>;
   method: () => Awaitable<string>;
   queryString?: (key: string, url: URL) => Awaitable<string | null | undefined>;
   url: () => Awaitable<URL>;
   transformResponse: (res: IActionResponse<string>) => Output;
+  waitUntil?: (promise: Promise<unknown>) => void;
 };
 
 export type IActionResponse<TBody extends string = string> = {
@@ -57,7 +66,6 @@ export type IActionResponse<TBody extends string = string> = {
   body: TBody;
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export class NovuRequestHandler<Input extends any[] = any[], Output = any> {
   public readonly frameworkName: string;
 
@@ -67,14 +75,17 @@ export class NovuRequestHandler<Input extends any[] = any[], Output = any> {
   private readonly hmacEnabled: boolean;
   private readonly http;
   private readonly workflows: Array<Workflow>;
+  private readonly agents: Array<Agent>;
 
   constructor(options: INovuRequestHandlerOptions<Input, Output>) {
     this.handler = options.handler;
     this.client = options.client ? options.client : new Client();
-    this.workflows = options.workflows;
+    this.workflows = options.workflows || [];
+    this.agents = options.agents || [];
     this.http = initApiClient(this.client.secretKey, this.client.apiUrl);
     this.frameworkName = options.frameworkName;
     this.hmacEnabled = this.client.strictAuthentication;
+    this.client.addAgents(this.agents);
   }
 
   public createHandler(): (...args: Input) => Promise<Output> {
@@ -95,6 +106,7 @@ export class NovuRequestHandler<Input extends any[] = any[], Output = any> {
     return {
       [HttpHeaderKeysEnum.CONTENT_TYPE]: 'application/json',
       [HttpHeaderKeysEnum.ACCESS_CONTROL_ALLOW_ORIGIN]: '*',
+      [HttpHeaderKeysEnum.ACCESS_CONTROL_ALLOW_PRIVATE_NETWORK]: 'true',
       [HttpHeaderKeysEnum.ACCESS_CONTROL_ALLOW_METHODS]: 'GET, POST',
       [HttpHeaderKeysEnum.ACCESS_CONTROL_ALLOW_HEADERS]: '*',
       [HttpHeaderKeysEnum.ACCESS_CONTROL_MAX_AGE]: '604800',
@@ -133,6 +145,8 @@ export class NovuRequestHandler<Input extends any[] = any[], Output = any> {
     const action = url.searchParams.get(HttpQueryKeysEnum.ACTION) || GetActionEnum.HEALTH_CHECK;
     const workflowId = url.searchParams.get(HttpQueryKeysEnum.WORKFLOW_ID) || '';
     const stepId = url.searchParams.get(HttpQueryKeysEnum.STEP_ID) || '';
+    const agentId = url.searchParams.get(HttpQueryKeysEnum.AGENT_ID) || '';
+    const agentEvent = url.searchParams.get(HttpQueryKeysEnum.EVENT) || '';
     const signatureHeader = (await actions.headers(HttpHeaderKeysEnum.NOVU_SIGNATURE)) || '';
 
     let body: Record<string, unknown> = {};
@@ -149,7 +163,15 @@ export class NovuRequestHandler<Input extends any[] = any[], Output = any> {
         await this.validateHmac(body, signatureHeader);
       }
 
-      const postActionMap = this.getPostActionMap(body, workflowId, stepId, action);
+      const postActionMap = this.getPostActionMap(
+        body,
+        workflowId,
+        stepId,
+        action,
+        agentId,
+        agentEvent,
+        actions.waitUntil
+      );
       const getActionMap = this.getGetActionMap(workflowId, stepId);
 
       if (method === HttpMethodEnum.POST) {
@@ -172,11 +194,13 @@ export class NovuRequestHandler<Input extends any[] = any[], Output = any> {
 
   private getPostActionMap(
     // TODO: add validation for body per action.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     body: any,
     workflowId: string,
     stepId: string,
-    action: string
+    action: string,
+    agentId: string,
+    agentEvent: string,
+    waitUntil?: (promise: Promise<unknown>) => void
   ): Record<PostActionEnum, () => Promise<IActionResponse>> {
     return {
       [PostActionEnum.TRIGGER]: this.triggerAction({ workflowId, ...body }),
@@ -200,6 +224,29 @@ export class NovuRequestHandler<Input extends any[] = any[], Output = any> {
 
         return this.createResponse(HttpStatusEnum.OK, result);
       },
+      [PostActionEnum.AGENT_EVENT]: async () => {
+        const registeredAgent = this.client.getAgent(agentId);
+
+        if (!registeredAgent) {
+          return this.createResponse(HttpStatusEnum.NOT_FOUND, { error: `Agent '${agentId}' not registered` });
+        }
+
+        const ctx = new AgentContextImpl(body as AgentBridgeRequest, this.client.secretKey);
+
+        const handlerPromise = this.runAgentHandler(registeredAgent, agentEvent, ctx).catch((err) => {
+          if (err instanceof AgentDeliveryError) {
+            console.error(`[agent:${agentId}] ${err.message}`);
+          } else {
+            console.error(`[agent:${agentId}] Handler error:`, err);
+          }
+        });
+
+        if (waitUntil) {
+          waitUntil(handlerPromise);
+        }
+
+        return this.createResponse(HttpStatusEnum.OK, { status: 'ack' });
+      },
     };
   }
 
@@ -214,6 +261,7 @@ export class NovuRequestHandler<Input extends any[] = any[], Output = any> {
         ...(triggerEvent.actor && { actor: triggerEvent.actor }),
         ...(triggerEvent.bridgeUrl && { bridgeUrl: triggerEvent.bridgeUrl }),
         ...(triggerEvent.controls && { controls: triggerEvent.controls }),
+        ...(triggerEvent.context && { context: triggerEvent.context }),
       };
 
       const result = await this.http.post('/events/trigger', requestPayload);
@@ -268,6 +316,57 @@ export class NovuRequestHandler<Input extends any[] = any[], Output = any> {
     }
   }
 
+  private async runAgentHandler(registeredAgent: Agent, event: string, ctx: AgentContextImpl): Promise<void> {
+    const replyIfPresent = async (result: MessageContent | void) => {
+      if (result != null) await ctx.reply(result);
+    };
+
+    switch (event) {
+      case AgentEventEnum.ON_MESSAGE:
+        await replyIfPresent(
+          await registeredAgent.handlers.onMessage({
+            message: ctx.message!,
+            ctx: ctx as unknown as AgentMessageContext,
+          })
+        );
+        break;
+      case AgentEventEnum.ON_ACTION:
+        if (registeredAgent.handlers.onAction) {
+          await replyIfPresent(
+            await registeredAgent.handlers.onAction({
+              actionId: ctx.action!.actionId,
+              value: ctx.action!.value,
+              ctx: ctx as unknown as AgentActionContext,
+            })
+          );
+        }
+        break;
+      case AgentEventEnum.ON_REACTION:
+        if (registeredAgent.handlers.onReaction) {
+          await replyIfPresent(
+            await registeredAgent.handlers.onReaction({
+              reaction: ctx.reaction!,
+              ctx: ctx as unknown as AgentReactionContext,
+            })
+          );
+        }
+        break;
+      case AgentEventEnum.ON_RESOLVE:
+        if (registeredAgent.handlers.onResolve) {
+          await replyIfPresent(
+            await registeredAgent.handlers.onResolve({
+              ctx: ctx as unknown as AgentResolveContext,
+            })
+          );
+        }
+        break;
+      default:
+        throw new InvalidActionError(event, AgentEventEnum);
+    }
+
+    await ctx.flush();
+  }
+
   private handleError(error: unknown): IActionResponse {
     if (isFrameworkError(error)) {
       if (error.statusCode >= 500) {
@@ -275,7 +374,6 @@ export class NovuRequestHandler<Input extends any[] = any[], Output = any> {
          * Log bridge server errors to assist the Developer in debugging errors with their integration.
          * This path is reached when the Bridge application throws an error, ensuring they can see the error in their logs.
          */
-        // eslint-disable-next-line no-console
         console.error(error);
       }
 
@@ -284,7 +382,6 @@ export class NovuRequestHandler<Input extends any[] = any[], Output = any> {
       return this.createError(error);
     } else {
       const bridgeError = new BridgeError(error);
-      // eslint-disable-next-line no-console
       console.error(bridgeError);
 
       return this.createError(bridgeError);

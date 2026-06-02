@@ -1,10 +1,14 @@
-import * as React from 'react';
 import * as AccordionPrimitive from '@radix-ui/react-accordion';
+import * as React from 'react';
 import { RiArrowDownSLine } from 'react-icons/ri';
 
 import { cn } from '@/utils/ui';
 
-const Accordion = AccordionPrimitive.Root;
+const Accordion = React.forwardRef<
+  React.ElementRef<typeof AccordionPrimitive.Root>,
+  React.ComponentPropsWithoutRef<typeof AccordionPrimitive.Root>
+>((props, ref) => <AccordionPrimitive.Root ref={ref} {...props} />);
+Accordion.displayName = AccordionPrimitive.Root.displayName;
 
 const AccordionItem = React.forwardRef<
   React.ElementRef<typeof AccordionPrimitive.Item>,
@@ -20,24 +24,25 @@ AccordionItem.displayName = 'AccordionItem';
 
 type AccordionTriggerProps = React.ComponentPropsWithoutRef<typeof AccordionPrimitive.Trigger> & {
   withChevron?: boolean;
+  rightSlot?: React.ReactNode;
 };
 
 const AccordionTrigger = React.forwardRef<React.ElementRef<typeof AccordionPrimitive.Trigger>, AccordionTriggerProps>(
-  ({ className, children, withChevron = true, ...props }, ref) => (
-    <AccordionPrimitive.Header className="flex">
+  ({ className, children, withChevron = true, rightSlot, ...props }, ref) => (
+    <AccordionPrimitive.Header className="flex w-full items-center">
       <AccordionPrimitive.Trigger
         ref={ref}
-        className={cn(
-          'flex flex-1 items-center justify-between text-sm font-medium transition-all [&[data-state=open]>svg]:rotate-180',
-          className
-        )}
+        className={cn('flex min-w-0 flex-1 items-center text-xs transition-all', className)}
         {...props}
       >
         {children}
-        {withChevron && (
-          <RiArrowDownSLine className="text-foreground-400 h-4 w-4 shrink-0 transition-transform duration-200" />
-        )}
       </AccordionPrimitive.Trigger>
+      {rightSlot}
+      {withChevron && (
+        <AccordionPrimitive.Trigger className="flex h-4 w-4 shrink-0 items-center justify-center text-xs transition-all [&[data-state=open]>svg]:rotate-180">
+          <RiArrowDownSLine className="text-foreground-400 h-4 w-4 transition-transform duration-200" />
+        </AccordionPrimitive.Trigger>
+      )}
     </AccordionPrimitive.Header>
   )
 );
@@ -57,4 +62,4 @@ const AccordionContent = React.forwardRef<
 ));
 AccordionContent.displayName = AccordionPrimitive.Content.displayName;
 
-export { Accordion, AccordionItem, AccordionTrigger, AccordionContent };
+export { Accordion, AccordionContent, AccordionItem, AccordionTrigger };

@@ -1,13 +1,13 @@
 import { EmailProviderIdEnum } from '@novu/shared';
 import {
   ChannelTypeEnum,
+  CheckIntegrationResponseEnum,
+  EmailEventStatusEnum,
+  ICheckIntegrationResponse,
+  IEmailEventBody,
   IEmailOptions,
   IEmailProvider,
   ISendMessageSuccessResponse,
-  ICheckIntegrationResponse,
-  CheckIntegrationResponseEnum,
-  IEmailEventBody,
-  EmailEventStatusEnum,
 } from '@novu/stateless';
 import axios, { AxiosInstance } from 'axios';
 import { BaseProvider, CasingEnum } from '../../../base.provider';
@@ -37,7 +37,7 @@ export class NetCoreProvider extends BaseProvider implements IEmailProvider {
       apiKey: string;
       from: string;
       senderName: string;
-    },
+    }
   ) {
     super();
     this.axiosInstance = axios.create({
@@ -47,7 +47,7 @@ export class NetCoreProvider extends BaseProvider implements IEmailProvider {
 
   async sendMessage(
     options: IEmailOptions,
-    bridgeProviderData: WithPassthrough<Record<string, unknown>> = {},
+    bridgeProviderData: WithPassthrough<Record<string, unknown>> = {}
   ): Promise<ISendMessageSuccessResponse> {
     const data: IEmailBody = this.transform<IEmailBody>(bridgeProviderData, {
       from: {
@@ -85,14 +85,16 @@ export class NetCoreProvider extends BaseProvider implements IEmailProvider {
     }
 
     if (options.attachments) {
-      data.personalizations[0].attachments = options.attachments?.map(
-        (attachment) => {
-          return {
-            name: attachment.name,
-            content: attachment.file.toString('base64'),
-          };
-        },
-      );
+      data.personalizations[0].attachments = options.attachments?.map((attachment) => {
+        return {
+          name: attachment.name,
+          content: attachment.file.toString('base64'),
+        };
+      });
+    }
+
+    if (options.headers && Object.keys(options.headers).length > 0) {
+      data.personalizations[0].headers = options.headers;
     }
 
     const emailOptions = {
@@ -106,8 +108,7 @@ export class NetCoreProvider extends BaseProvider implements IEmailProvider {
       data: JSON.stringify(data),
     };
 
-    const response =
-      await this.axiosInstance.request<IEmailResponse>(emailOptions);
+    const response = await this.axiosInstance.request<IEmailResponse>(emailOptions);
 
     return {
       id: response?.data.data?.message_id,
@@ -115,9 +116,7 @@ export class NetCoreProvider extends BaseProvider implements IEmailProvider {
     };
   }
 
-  async checkIntegration(
-    options: IEmailOptions,
-  ): Promise<ICheckIntegrationResponse> {
+  async checkIntegration(options: IEmailOptions): Promise<ICheckIntegrationResponse> {
     return {
       success: true,
       message: 'Integrated successfully!',
@@ -133,12 +132,8 @@ export class NetCoreProvider extends BaseProvider implements IEmailProvider {
     return [body.TRANSID];
   }
 
-  parseEventBody(
-    body: any | any[],
-    identifier: string,
-  ): IEmailEventBody | undefined {
+  parseEventBody(body: any | any[], identifier: string): IEmailEventBody | undefined {
     if (Array.isArray(body)) {
-      // eslint-disable-next-line no-param-reassign
       body = body.find((item) => item.TRANSID === identifier);
     }
 

@@ -1,6 +1,11 @@
+import { ReactNode } from 'react';
 import { ExternalToast, toast } from 'sonner';
 import { Toast, ToastIcon, ToastProps } from './sonner';
-import { ReactNode } from 'react';
+
+// Consistent toast options for bottom-center positioning like inbox-usecase-page
+const CONSISTENT_TOAST_OPTIONS: ExternalToast = {
+  position: 'bottom-center',
+};
 
 export const showToast = ({
   options,
@@ -14,27 +19,28 @@ export const showToast = ({
     duration: 5000,
     unstyled: true,
     closeButton: false,
+    ...CONSISTENT_TOAST_OPTIONS,
     ...options,
   });
 };
 
-export const showSuccessToast = (message: string, position: 'bottom-center' | 'top-center' = 'bottom-center') => {
+export const showSuccessToast = (message: string, title?: string, options: ExternalToast = {}) => {
   showToast({
+    title,
     children: () => (
       <>
         <ToastIcon variant="success" />
         <span className="text-sm">{message}</span>
       </>
     ),
-    options: { position },
+    options: {
+      ...CONSISTENT_TOAST_OPTIONS,
+      ...options,
+    },
   });
 };
 
-export const showErrorToast = (
-  message: string,
-  title?: string,
-  position: 'bottom-center' | 'top-center' = 'bottom-center'
-) => {
+export const showErrorToast = (message: string | ReactNode, title?: string, options: ExternalToast = {}) => {
   showToast({
     title,
     children: () => (
@@ -43,6 +49,25 @@ export const showErrorToast = (
         <span className="text-sm">{message}</span>
       </>
     ),
-    options: { position },
+    options: {
+      ...CONSISTENT_TOAST_OPTIONS,
+      ...options,
+    },
+  });
+};
+
+export const showWarningToast = (message: string | ReactNode, title?: string, options: ExternalToast = {}) => {
+  showToast({
+    title,
+    children: () => (
+      <>
+        <ToastIcon variant="warning" />
+        <span className="text-sm">{message}</span>
+      </>
+    ),
+    options: {
+      position: 'bottom-center',
+      ...options,
+    },
   });
 };

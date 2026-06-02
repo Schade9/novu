@@ -42,6 +42,8 @@ export class UserEntity implements IUserEntity {
 
   createdAt: string;
 
+  updatedAt: string;
+
   showOnBoarding?: boolean;
   showOnBoardingTour?: number;
 
@@ -50,7 +52,7 @@ export class UserEntity implements IUserEntity {
     lastFailedAttempt: string;
   };
 
-  servicesHashes?: { intercom?: string; plain?: string };
+  servicesHashes?: { plain?: string };
 
   jobTitle?: JobTitleEnum;
 

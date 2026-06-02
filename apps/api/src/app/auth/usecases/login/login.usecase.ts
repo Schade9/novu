@@ -1,12 +1,11 @@
-import bcrypt from 'bcrypt';
-import { Injectable, UnauthorizedException } from '@nestjs/common';
-import { differenceInMinutes, parseISO } from 'date-fns';
-import { UserRepository, UserEntity, OrganizationRepository } from '@novu/dal';
-import { AnalyticsService, AuthService, createHash } from '@novu/application-generic';
-
+import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { AnalyticsService } from '@novu/application-generic';
+import { OrganizationRepository, UserEntity, UserRepository } from '@novu/dal';
 import { normalizeEmail } from '@novu/shared';
+import bcrypt from 'bcrypt';
+import { differenceInMinutes, parseISO } from 'date-fns';
+import { AuthService } from '../../services/auth.service';
 import { LoginCommand } from './login.command';
-import { ApiException } from '../../../shared/exceptions/api.exception';
 
 @Injectable()
 export class Login {
@@ -44,7 +43,7 @@ export class Login {
     }
 
     // TODO: Trigger a password reset flow automatically for existing OAuth users instead of throwing an error
-    if (!user.password) throw new ApiException('Please sign in using Github.');
+    if (!user.password) throw new BadRequestException('Please sign in using Github.');
 
     const isMatching = await bcrypt.compare(command.password, user.password);
     if (!isMatching) {
@@ -61,19 +60,6 @@ export class Login {
       }
 
       throw new UnauthorizedException(`Incorrect email or password provided.`);
-    }
-
-    if (process.env.INTERCOM_IDENTITY_VERIFICATION_SECRET_KEY && !user.servicesHashes?.intercom) {
-      const intercomSecretKey = process.env.INTERCOM_IDENTITY_VERIFICATION_SECRET_KEY as string;
-      const userHashForIntercom = createHash(intercomSecretKey, user._id);
-      await this.userRepository.update(
-        { _id: user._id },
-        {
-          $set: {
-            'servicesHashes.intercom': userHashForIntercom,
-          },
-        }
-      );
     }
 
     this.analyticsService.upsertUser(user, user._id);

@@ -1,32 +1,56 @@
-import { Separator } from '@/components/primitives/separator';
+import { EnvironmentTypeEnum, UiComponentEnum, type UiSchema, UiSchemaGroupEnum } from '@novu/shared';
+import { useState } from 'react';
 import { getComponentByType } from '@/components/workflow-editor/steps/component-utils';
 import { EmailPreviewHeader } from '@/components/workflow-editor/steps/email/email-preview';
-import { EmailTabsSection } from '@/components/workflow-editor/steps/email/email-tabs-section';
-import { UiSchemaGroupEnum, type UiSchema } from '@novu/shared';
+import { SenderConfigDrawer } from '@/components/workflow-editor/steps/email/sender-config-drawer';
+import { useEnvironment } from '@/context/environment/hooks';
+import { cn } from '../../../../utils/ui';
+import { StepEditorUnavailable } from '../step-editor-unavailable';
 
-type EmailEditorProps = { uiSchema: UiSchema };
+type EmailEditorProps = { uiSchema: UiSchema; isEditorV2?: boolean };
+
 export const EmailEditor = (props: EmailEditorProps) => {
-  const { uiSchema } = props;
+  const { currentEnvironment } = useEnvironment();
+  const { uiSchema, isEditorV2 = false } = props;
+  const [senderDrawerOpen, setSenderDrawerOpen] = useState(false);
 
   if (uiSchema.group !== UiSchemaGroupEnum.EMAIL) {
     return null;
   }
 
-  const { body, subject } = uiSchema.properties ?? {};
+  const { body, subject, disableOutputSanitization, editorType, layoutId } = uiSchema.properties ?? {};
 
   return (
-    <div className="flex h-full flex-col">
-      <EmailTabsSection>
-        <EmailPreviewHeader />
-      </EmailTabsSection>
-      <EmailTabsSection className="-mx-[2px] -my-[3px] px-7 py-2">
-        {getComponentByType({ component: subject.component })}
-      </EmailTabsSection>
-      <Separator className="before:bg-neutral-100" />
-      {/* extra padding on the left to account for the drag handle */}
-      <EmailTabsSection className="basis-full overflow-hidden pl-10">
-        {getComponentByType({ component: body.component })}
-      </EmailTabsSection>
-    </div>
+    <>
+      <div className="flex h-full flex-col">
+        <div className={cn('px-4 pb-0 pt-4', isEditorV2 && 'px-0 pt-0')}>
+          <div className={cn(isEditorV2 && 'border-b border-neutral-200 px-3 py-2')}>
+            <EmailPreviewHeader minimalHeader={isEditorV2} onEditSenderClick={() => setSenderDrawerOpen(true)}>
+              {disableOutputSanitization &&
+                getComponentByType({
+                  component: disableOutputSanitization.component,
+                })}
+              {getComponentByType({ component: editorType?.component ?? UiComponentEnum.EMAIL_EDITOR_SELECT })}
+            </EmailPreviewHeader>
+          </div>
+
+          {subject && (
+            <div className={cn(isEditorV2 && 'px-3 py-0')}>{getComponentByType({ component: subject.component })}</div>
+          )}
+          {layoutId && (
+            <div className="flex items-center gap-0.5 border-b border-t border-neutral-100 px-1 py-1">
+              {getComponentByType({ component: layoutId.component ?? UiComponentEnum.LAYOUT_SELECT })}
+            </div>
+          )}
+        </div>
+        {currentEnvironment?.type === EnvironmentTypeEnum.DEV ? (
+          getComponentByType({ component: body.component })
+        ) : (
+          <StepEditorUnavailable />
+        )}
+      </div>
+
+      <SenderConfigDrawer open={senderDrawerOpen} onOpenChange={setSenderDrawerOpen} />
+    </>
   );
 };

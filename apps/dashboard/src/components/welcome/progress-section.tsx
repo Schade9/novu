@@ -1,13 +1,14 @@
-import { Card, CardContent } from '../primitives/card';
-import { RiArrowRightDoubleFill, RiCheckLine, RiLoader3Line } from 'react-icons/ri';
-import { useOnboardingSteps, StepIdEnum } from '../../hooks/use-onboarding-steps';
-import { Link, useParams } from 'react-router-dom';
-import { buildRoute, ROUTES } from '../../utils/routes';
 import { motion } from 'motion/react';
-import { mainCard, leftSection, textItem, stepsList, stepItem, logo } from './progress-section.animations';
-import { PointingArrow, NovuLogo } from './icons';
+import { RiArrowRightDoubleFill, RiCheckLine, RiLoader3Line } from 'react-icons/ri';
+import { Link, useParams } from 'react-router-dom';
+import { StepIdEnum, useOnboardingSteps } from '../../hooks/use-onboarding-steps';
 import { useTelemetry } from '../../hooks/use-telemetry';
+import { buildRoute, ROUTES } from '../../utils/routes';
 import { TelemetryEvent } from '../../utils/telemetry';
+import { cn } from '../../utils/ui';
+import { Card, CardContent } from '../primitives/card';
+import { NovuLogo, PointingArrow } from './icons';
+import { leftSection, logo, mainCard, stepItem, stepsList, textItem } from './progress-section.animations';
 
 interface StepItemProps {
   step: {
@@ -19,25 +20,44 @@ interface StepItemProps {
   environmentSlug?: string;
 }
 
-export function ProgressSection() {
+export function ProgressSection({ isNewHomePageEnabled }: { isNewHomePageEnabled?: boolean }) {
   const { environmentSlug } = useParams<{ environmentSlug?: string }>();
   const { steps } = useOnboardingSteps();
 
   return (
-    <motion.div variants={mainCard} initial="hidden" animate="show">
-      <Card className="relative flex items-stretch gap-2 rounded-xl border-neutral-100 shadow-none">
-        <WelcomeHeader />
+    <motion.div variants={mainCard} initial="hidden" animate="show" className="w-full">
+      <Card
+        className={cn(
+          'relative flex items-stretch gap-2 rounded-xl border-neutral-100 shadow-none w-full',
+          isNewHomePageEnabled ? 'flex-col bg-transparent' : 'flex-col md:flex-row'
+        )}
+      >
+        {isNewHomePageEnabled ? <HomePageHeader /> : <WelcomeHeader />}
 
-        <motion.div className="flex flex-1 flex-col gap-3 p-6" variants={stepsList}>
+        <motion.div
+          className={cn('flex flex-1 flex-col gap-3', isNewHomePageEnabled ? 'p-3 pt-0' : 'p-4 md:p-6')}
+          variants={stepsList}
+        >
           {steps.map((step, index) => (
             <StepItem key={index} step={step} environmentSlug={environmentSlug} />
           ))}
         </motion.div>
 
-        <motion.div variants={logo} className="absolute bottom-0 right-0">
-          <NovuLogo />
-        </motion.div>
+        {!isNewHomePageEnabled && (
+          <motion.div variants={logo} className="absolute bottom-0 right-0 hidden md:block">
+            <NovuLogo />
+          </motion.div>
+        )}
       </Card>
+    </motion.div>
+  );
+}
+
+function HomePageHeader() {
+  return (
+    <motion.div variants={leftSection} className="p-3">
+      <h2 className="text-label-xs text-text-strong">You're doing great work! 💪</h2>
+      <p className="text-label-xs text-text-soft">Set up Novu to send notifications your users will love.</p>
     </motion.div>
   );
 }
@@ -54,7 +74,7 @@ function StepItem({ step, environmentSlug }: StepItemProps) {
   };
 
   return (
-    <motion.div className="flex max-w-[370px] items-center gap-1.5" variants={stepItem}>
+    <motion.div className="flex w-full items-center gap-1.5 md:max-w-[370px]" variants={stepItem}>
       <div
         className={`${step.status === 'completed' ? 'bg-success' : 'shadow-xs'} flex h-6 w-6 min-w-6 items-center justify-center rounded-full`}
       >
@@ -72,7 +92,7 @@ function StepItem({ step, environmentSlug }: StepItemProps) {
         onClick={handleStepClick}
       >
         <Card
-          className={`shadow-xs w-full p-1 ${step.status !== 'completed' ? 'transition-all duration-200 hover:translate-x-[1px] hover:shadow-md' : ''}`}
+          className={`shadow-xs w-full p-1 ${step.status !== 'completed' ? 'transition-all duration-200 hover:translate-x-px hover:shadow-md' : ''}`}
         >
           <CardContent className="flex flex-col rounded-[6px] bg-[#FBFBFB] px-2 py-1.5">
             <div className="flex items-center justify-between">
@@ -95,22 +115,22 @@ function WelcomeHeader() {
   return (
     <motion.div
       variants={leftSection}
-      className="flex w-full max-w-[380px] grow flex-col items-start justify-between gap-2 rounded-l-xl bg-[#FBFBFB] p-6"
+      className="flex w-full grow flex-col items-start justify-between gap-2 rounded-t-xl bg-[#FBFBFB] p-4 md:max-w-[380px] md:rounded-l-xl md:rounded-tr-none md:p-6"
     >
       <div className="flex w-full flex-col gap-2">
         <motion.h2 variants={textItem} className="font-label-medium text-base font-medium">
           You're doing great work! 💪
         </motion.h2>
 
-        <div className="text-foreground-400 flex flex-col gap-6 text-sm">
+        <div className="text-foreground-400 flex flex-col gap-4 text-sm md:gap-6">
           <motion.p variants={textItem}>Set up Novu to send notifications your users will love.</motion.p>
-          <motion.p variants={textItem}>
+          <motion.p variants={textItem} className="hidden md:block">
             Streamline all your customer messaging in one tool and delight them at every touchpoint.
           </motion.p>
         </div>
       </div>
 
-      <motion.div variants={textItem} className="space-between flex items-center gap-0">
+      <motion.div variants={textItem} className="hidden items-center gap-0 md:flex">
         <p className="text-foreground-400 text-sm">Get started with our setup guide.</p>
         <PointingArrow className="relative left-[15px] top-[-10px]" />
       </motion.div>

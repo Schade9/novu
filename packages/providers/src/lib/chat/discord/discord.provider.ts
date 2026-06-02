@@ -1,9 +1,11 @@
 import { ChatProviderIdEnum } from '@novu/shared';
 import {
   ChannelTypeEnum,
+  ENDPOINT_TYPES,
   IChatOptions,
   IChatProvider,
   ISendMessageSuccessResponse,
+  isChannelDataOfType,
 } from '@novu/stateless';
 import axios from 'axios';
 import { BaseProvider, CasingEnum } from '../../../base.provider';
@@ -21,17 +23,24 @@ export class DiscordProvider extends BaseProvider implements IChatProvider {
 
   async sendMessage(
     data: IChatOptions,
-    bridgeProviderData: WithPassthrough<Record<string, unknown>> = {},
+    bridgeProviderData: WithPassthrough<Record<string, unknown>> = {}
   ): Promise<ISendMessageSuccessResponse> {
     // Setting the wait parameter with the URL API to respect user parameters
-    const url = new URL(data.webhookUrl);
+    if (!isChannelDataOfType(data.channelData, ENDPOINT_TYPES.WEBHOOK)) {
+      throw new Error('Invalid channel data for Discord provider');
+    }
+
+    const { endpoint } = data.channelData;
+
+    const url = new URL(endpoint.url);
+
     url.searchParams.set('wait', 'true');
     const response = await this.axiosInstance.post(
       url.toString(),
       this.transform(bridgeProviderData, {
         content: data.content,
         ...(data.customData || {}),
-      }).body,
+      }).body
     );
 
     return {

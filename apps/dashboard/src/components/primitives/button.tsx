@@ -15,17 +15,17 @@ export const buttonVariants = tv({
   slots: {
     root: [
       // base
-      'group select-none relative inline-flex items-center justify-center whitespace-nowrap outline-none',
+      'group select-none relative inline-flex items-center justify-center whitespace-nowrap outline-hidden cursor-pointer disabled:cursor-default',
       'transition duration-200 ease-out',
       // focus
-      'focus:outline-none',
+      'focus:outline-hidden',
       // disabled
       'disabled:pointer-events-none [&:disabled:not(.loading)]:bg-bg-weak [&:disabled:not(.loading)]:text-text-disabled [&:disabled:not(.loading)]:ring-transparent',
     ],
     icon: [
       // base
       'flex size-5 shrink-0 items-center justify-center transition-transform duration-200',
-      '[&.arrow-right-hover-animation]:group-hover:translate-x-0.5',
+      'group-hover:[&.arrow-right-hover-animation]:translate-x-0.5',
     ],
   },
   variants: {
@@ -37,7 +37,7 @@ export const buttonVariants = tv({
     mode: {
       filled: {},
       outline: {
-        root: 'ring-1 ring-inset',
+        root: 'border',
       },
       lighter: {
         root: 'ring-1 ring-inset',
@@ -59,17 +59,17 @@ export const buttonVariants = tv({
         icon: '',
       },
       xs: {
-        root: 'h-8 gap-2.5 rounded-lg px-1.5 text-label-xs',
+        root: 'h-8 gap-2.5 rounded-lg px-3 text-label-xs',
         icon: 'size-4',
       },
       '2xs': {
-        root: 'h-7 gap-2.5 rounded-lg px-1.5 text-label-xs',
+        root: 'h-7 gap-2.5 rounded-lg px-2 text-label-xs',
         icon: 'size-4',
       },
     },
   },
   compoundVariants: [
-    //#region variant=primary
+    // #region variant=primary
     {
       variant: 'primary',
       mode: 'filled',
@@ -137,12 +137,14 @@ export const buttonVariants = tv({
           'hover:after:opacity-100',
           // focus
           'focus-visible:bg-bg-white focus-visible:shadow-button-primary-focus focus-visible:ring-primary-base',
+          // disabled
+          'disabled:bg-bg-weak disabled:text-text-disabled disabled:shadow-none disabled:before:hidden disabled:after:hidden',
         ],
       },
     },
-    //#endregion
+    // #endregion
 
-    //#region variant=neutral
+    // #region variant=neutral
     {
       variant: 'secondary',
       mode: 'filled',
@@ -213,9 +215,9 @@ export const buttonVariants = tv({
         ],
       },
     },
-    //#endregion
+    // #endregion
 
-    //#region variant=error
+    // #region variant=error
     {
       variant: 'error',
       mode: 'filled',
@@ -286,7 +288,7 @@ export const buttonVariants = tv({
         ],
       },
     },
-    //#endregion
+    // #endregion
   ],
   defaultVariants: {
     variant: 'primary',
@@ -339,7 +341,7 @@ const ButtonRoot = React.forwardRef<HTMLButtonElement, ButtonRootProps>(
       >
         {extendedChildren}
         {isLoading && (
-          <div className="animate-in zoom-in-50 fade-in absolute inset-0 flex w-full items-center justify-center rounded-lg text-current backdrop-blur duration-300">
+          <div className="animate-in zoom-in-50 fade-in absolute inset-0 flex w-full items-center justify-center rounded-lg text-current backdrop-blur-sm duration-300">
             <RiLoader4Line className="size-4 animate-spin" />
           </div>
         )}
@@ -386,6 +388,7 @@ function ButtonIcon<T extends React.ElementType>({
 
   return <Component className={icon({ class: className })} {...rest} />;
 }
+
 ButtonIcon.displayName = BUTTON_ICON_NAME;
 
 export { Button, ButtonIcon, ButtonRoot };

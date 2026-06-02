@@ -2,7 +2,7 @@ import { tv, type VariantProps } from '@/utils/tv';
 
 const SEPARATOR_ROOT_NAME = 'SeparatorRoot';
 
-export const separatorVariants = tv({
+const separatorVariants = tv({
   base: 'relative flex w-full items-center',
   variants: {
     variant: {
@@ -54,6 +54,7 @@ function Separator({
 }: React.HTMLAttributes<HTMLDivElement> & VariantProps<typeof separatorVariants>) {
   return <div role="separator" className={separatorVariants({ variant, class: className })} {...rest} />;
 }
+
 Separator.displayName = SEPARATOR_ROOT_NAME;
 
 export { Separator };

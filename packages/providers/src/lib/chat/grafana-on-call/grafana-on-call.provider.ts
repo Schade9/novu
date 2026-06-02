@@ -1,19 +1,18 @@
 import { ChatProviderIdEnum } from '@novu/shared';
 import {
   ChannelTypeEnum,
-  ISendMessageSuccessResponse,
+  ENDPOINT_TYPES,
   IChatOptions,
   IChatProvider,
+  ISendMessageSuccessResponse,
+  isChannelDataOfType,
 } from '@novu/stateless';
 import axios from 'axios';
 import { v4 as uuid } from 'uuid';
 import { BaseProvider, CasingEnum } from '../../../base.provider';
 import { WithPassthrough } from '../../../utils/types';
 
-export class GrafanaOnCallChatProvider
-  extends BaseProvider
-  implements IChatProvider
-{
+export class GrafanaOnCallChatProvider extends BaseProvider implements IChatProvider {
   id = ChatProviderIdEnum.GrafanaOnCall;
   channelType = ChannelTypeEnum.CHAT as ChannelTypeEnum.CHAT;
   protected casing = CasingEnum.SNAKE_CASE;
@@ -25,16 +24,22 @@ export class GrafanaOnCallChatProvider
       imageUrl?: string;
       state?: string;
       externalLink?: string;
-    },
+    }
   ) {
     super();
   }
 
   async sendMessage(
     options: IChatOptions,
-    bridgeProviderData: WithPassthrough<Record<string, unknown>> = {},
+    bridgeProviderData: WithPassthrough<Record<string, unknown>> = {}
   ): Promise<ISendMessageSuccessResponse> {
-    const url = new URL(options.webhookUrl);
+    if (!isChannelDataOfType(options.channelData, ENDPOINT_TYPES.WEBHOOK)) {
+      throw new Error('Invalid channel data for GrafanaOnCall provider');
+    }
+
+    const { endpoint } = options.channelData;
+
+    const url = new URL(endpoint.url);
     const data = this.transform(bridgeProviderData, {
       alert_uid: this.config.alertUid,
       title: this.config.title,
@@ -54,7 +59,7 @@ export class GrafanaOnCallChatProvider
         ? {
             headers: data.headers as Record<string, string>,
           }
-        : undefined,
+        : undefined
     );
 
     return {

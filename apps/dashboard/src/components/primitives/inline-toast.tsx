@@ -1,6 +1,6 @@
-import { cn } from '@/utils/ui';
 import { cva, type VariantProps } from 'class-variance-authority';
 import * as React from 'react';
+import { cn } from '@/utils/ui';
 import { Button } from './button';
 
 const inlineToastVariants = cva('flex items-center justify-between gap-3 rounded-lg border px-2 py-1.5', {
@@ -8,6 +8,7 @@ const inlineToastVariants = cva('flex items-center justify-between gap-3 rounded
     variant: {
       tip: 'border-neutral-100 bg-neutral-50',
       warning: 'border-warning/20 bg-warning/10',
+      'soft-warning': 'border-neutral-100 bg-neutral-50',
       success: 'border-success/20 bg-success/10',
       error: 'border-destructive/20 bg-destructive/10',
       info: 'border-information/20 bg-information/10',
@@ -21,6 +22,7 @@ const inlineToastVariants = cva('flex items-center justify-between gap-3 rounded
 const VARIANT_COLORS = {
   tip: 'bg-[#717784]',
   warning: 'bg-warning',
+  'soft-warning': 'bg-warning',
   success: 'bg-success',
   error: 'bg-destructive',
   info: 'bg-information',
@@ -29,6 +31,7 @@ const VARIANT_COLORS = {
 const BUTTON_COLORS = {
   tip: 'text-[#DD2450]',
   warning: 'text-warning',
+  'soft-warning': 'text-warning',
   success: 'text-success',
   error: 'text-destructive',
   info: 'text-information',
@@ -61,9 +64,9 @@ export function InlineToast({
 
   return (
     <div className={cn(inlineToastVariants({ variant }), className)} {...props}>
-      <div className="flex items-stretch gap-3">
-        <div className={cn('w-1 rounded-full', barColorClass)} />
-        <div className="text-foreground-600 py-[2px] text-xs">
+      <div className="flex min-w-0 flex-1 items-stretch gap-3">
+        <div className={cn('w-1 shrink-0 rounded-full', barColorClass)} />
+        <div className="text-foreground-600 min-w-0 flex-1 py-[2px] text-xs">
           {title && <span className="text-foreground-950 font-medium">{title}</span>}
           {title && description && ' '}
           {description}

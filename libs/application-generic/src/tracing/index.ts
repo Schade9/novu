@@ -1,2 +1,3 @@
-export * from './tracing.module';
+export * from './otel-init';
 export * from './otel-wrapper';
+export * from './tracing.module';

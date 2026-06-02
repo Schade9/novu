@@ -1,22 +1,19 @@
 import { EmailProviderIdEnum } from '@novu/shared';
 import {
   ChannelTypeEnum,
+  CheckIntegrationResponseEnum,
+  EmailEventStatusEnum,
+  ICheckIntegrationResponse,
+  IEmailEventBody,
   IEmailOptions,
   IEmailProvider,
   ISendMessageSuccessResponse,
-  ICheckIntegrationResponse,
-  CheckIntegrationResponseEnum,
-  IEmailEventBody,
-  EmailEventStatusEnum,
 } from '@novu/stateless';
-import { Errors, ServerClient, Message, Models } from 'postmark';
+import { Errors, Message, Models, ServerClient } from 'postmark';
 import { BaseProvider, CasingEnum } from '../../../base.provider';
 import { WithPassthrough } from '../../../utils/types';
 
-export class PostmarkEmailProvider
-  extends BaseProvider
-  implements IEmailProvider
-{
+export class PostmarkEmailProvider extends BaseProvider implements IEmailProvider {
   id = EmailProviderIdEnum.Postmark;
   protected casing = CasingEnum.PASCAL_CASE;
   channelType = ChannelTypeEnum.EMAIL as ChannelTypeEnum.EMAIL;
@@ -26,7 +23,7 @@ export class PostmarkEmailProvider
     private config: {
       apiKey: string;
       from: string;
-    },
+    }
   ) {
     super();
     this.client = new ServerClient(this.config.apiKey);
@@ -34,14 +31,11 @@ export class PostmarkEmailProvider
 
   async sendMessage(
     options: IEmailOptions,
-    bridgeProviderData: WithPassthrough<Record<string, unknown>> = {},
+    bridgeProviderData: WithPassthrough<Record<string, unknown>> = {}
   ): Promise<ISendMessageSuccessResponse> {
     const mailData = this.createMailData(options);
     const response = await this.client.sendEmail(
-      this.transform<Message>(
-        bridgeProviderData,
-        mailData as unknown as Record<string, unknown>,
-      ).body,
+      this.transform<Message>(bridgeProviderData, mailData as unknown as Record<string, unknown>).body
     );
 
     return {
@@ -50,9 +44,7 @@ export class PostmarkEmailProvider
     };
   }
 
-  async checkIntegration(
-    options: IEmailOptions,
-  ): Promise<ICheckIntegrationResponse> {
+  async checkIntegration(options: IEmailOptions): Promise<ICheckIntegrationResponse> {
     try {
       const mailData = this.createMailData(options);
       await this.client.sendEmail(mailData);
@@ -90,16 +82,16 @@ export class PostmarkEmailProvider
       Bcc: getFormattedTo(options.bcc),
       Attachments: options.attachments?.map(
         (attachment) =>
-          new Models.Attachment(
-            attachment.name,
-            attachment.file.toString('base64'),
-            attachment.mime,
-          ),
+          new Models.Attachment(attachment.name, attachment.file.toString('base64'), attachment.mime, attachment.cid)
       ),
     };
 
     if (options.replyTo) {
       mailData.ReplyTo = options.replyTo;
+    }
+
+    if (options.headers && Object.keys(options.headers).length > 0) {
+      mailData.Headers = Object.entries(options.headers).map(([Name, Value]) => ({ Name, Value }));
     }
 
     return mailData;
@@ -113,12 +105,8 @@ export class PostmarkEmailProvider
     return [body.MessageID];
   }
 
-  parseEventBody(
-    body: any | any[],
-    identifier: string,
-  ): IEmailEventBody | undefined {
+  parseEventBody(body: any | any[], identifier: string): IEmailEventBody | undefined {
     if (Array.isArray(body)) {
-      // eslint-disable-next-line no-param-reassign
       body = body.find((item) => item.MessageID === identifier);
     }
 

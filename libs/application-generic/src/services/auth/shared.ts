@@ -1,5 +1,5 @@
 export const buildOauthRedirectUrl = (request): string => {
-  let url = `${process.env.FRONT_BASE_URL}/auth/login`;
+  let url = `${process.env.DASHBOARD_URL || process.env.FRONT_BASE_URL}/auth/login`;
 
   if (!request.user || !request.user.token) {
     return `${url}?error=AuthenticationError`;
@@ -11,11 +11,7 @@ export const buildOauthRedirectUrl = (request): string => {
    * Make sure we only allow localhost redirects for CLI use and our own success route
    * https://github.com/novuhq/novu/security/code-scanning/3
    */
-  if (
-    redirectUrl &&
-    redirectUrl.startsWith('http://127.0.0.1:') &&
-    !redirectUrl.includes('@')
-  ) {
+  if (redirectUrl && redirectUrl.startsWith('http://127.0.0.1:') && !redirectUrl.includes('@')) {
     url = redirectUrl;
   }
 

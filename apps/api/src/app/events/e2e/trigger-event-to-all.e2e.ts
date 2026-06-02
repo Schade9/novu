@@ -1,19 +1,4 @@
-import { expect } from 'chai';
-import sinon from 'sinon';
 import { Test } from '@nestjs/testing';
-import axios from 'axios';
-
-import { SubscribersService, UserSession } from '@novu/testing';
-import {
-  ExternalSubscriberId,
-  ISubscribersDefine,
-  ITopic,
-  SubscriberSourceEnum,
-  TopicId,
-  TopicKey,
-  TriggerRecipients,
-  TriggerRecipientsTypeEnum,
-} from '@novu/shared';
 import {
   IProcessSubscriberBulkJobDto,
   mapSubscribersToJobs,
@@ -22,16 +7,45 @@ import {
   TriggerMulticastCommand,
 } from '@novu/application-generic';
 import { NotificationTemplateEntity, SubscriberEntity } from '@novu/dal';
-
+import {
+  ExternalSubscriberId,
+  ISubscribersDefine,
+  ITopic,
+  SubscriberSourceEnum,
+  TopicId,
+  TopicKey,
+  TopicName,
+  TriggerRecipients,
+  TriggerRecipientsTypeEnum,
+} from '@novu/shared';
+import { SubscribersService, UserSession } from '@novu/testing';
+import axios from 'axios';
+import { expect } from 'chai';
+import sinon from 'sinon';
+import { PreferencesModule } from '../../preferences/preferences.module';
+import { initNovuClassSdk } from '../../shared/helpers/e2e/sdk/e2e-sdk.helper';
 import { SharedModule } from '../../shared/shared.module';
 import { EventsModule } from '../events.module';
-import { createTopic } from '../../topics/e2e/helpers/topic-e2e-helper';
 
 const axiosInstance = axios.create();
 
 const TOPIC_PATH = '/v1/topics';
 const TOPIC_KEY_PREFIX = 'topic-key-trigger-event_';
 const TOPIC_NAME_PREFIX = 'topic-name-trigger-event_';
+
+// Helper function to create a topic
+const createTopic = async (
+  session: UserSession,
+  key: TopicKey,
+  name: TopicName
+): Promise<{ _id: TopicId; key: TopicKey }> => {
+  const response = await initNovuClassSdk(session).topics.create({ key, name });
+
+  expect(response.result.id).to.exist;
+  expect(response.result.key).to.eql(key);
+
+  return { _id: response.result.id, key: response.result.key };
+};
 
 export class MockSubscriberProcessQueueService {
   addBulk(data: IProcessSubscriberBulkJobDto[]) {}
@@ -54,10 +68,9 @@ function expectBulkTopicStub(secondCallStubArgs: IProcessSubscriberBulkJobDto[],
     expect(job.groupId).to.be.equal(stubJob.groupId);
     expect(job.options).to.be.equal(stubJob.options);
 
-    const { subscriber, ...jobDataWithoutSubscriber } = job.data;
-    const { subscriber: stubSubscriber, ...stubJobDataWithoutSubscriber } = stubJob.data;
+    const { subscriber, topics, ...jobDataWithoutSubscriber } = job.data;
+    const { subscriber: stubSubscriber, topics: stubTopics, ...stubJobDataWithoutSubscriber } = stubJob.data;
 
-    expect(subscriber.subscriberId).to.be.equal(stubSubscriber.subscriberId);
     expect(jobDataWithoutSubscriber).to.deep.equal(stubJobDataWithoutSubscriber);
   }
 }
@@ -88,7 +101,7 @@ describe('TriggerMulticast #novu-v2', () => {
 
   beforeEach(async () => {
     const moduleRef = await Test.createTestingModule({
-      imports: [SharedModule, EventsModule],
+      imports: [SharedModule, EventsModule, PreferencesModule],
       providers: [
         TriggerMulticast,
         {
@@ -104,7 +117,9 @@ describe('TriggerMulticast #novu-v2', () => {
   });
 
   afterEach(() => {
-    addBulkStub.restore();
+    if (addBulkStub) {
+      addBulkStub.restore();
+    }
   });
 
   let session: UserSession;
@@ -170,20 +185,6 @@ describe('TriggerMulticast #novu-v2', () => {
     const firstJobs = mapSubscribersToJobs(SubscriberSourceEnum.SINGLE, subscribers, command);
 
     expectBulkSingleSubscriberStub(firstCallStubData, firstJobs);
-  });
-
-  it('should fail on if provided topic key is not exists', async () => {
-    const invalidTopicKey = 'none_existing_topic_key';
-    const command: TriggerMulticastCommand = buildTriggerMulticastCommandMock({
-      to: [...to, { type: TriggerRecipientsTypeEnum.TOPIC, topicKey: invalidTopicKey }],
-      organizationId: session.organization._id,
-      environmentId: session.environment._id,
-      userId: session.user._id,
-    }) as any;
-
-    const res = await getErrorMessage(async () => await triggerMulticast.execute(command));
-
-    expect(res).to.be.equal(`Topic with key ${invalidTopicKey} not found in current environment`);
   });
 
   it('should send only single subscribers forward to processing', async () => {

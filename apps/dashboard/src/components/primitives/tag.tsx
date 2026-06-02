@@ -2,11 +2,10 @@
 
 import { Slot } from '@radix-ui/react-slot';
 import * as React from 'react';
-
+import { RiCloseFill } from 'react-icons/ri';
 import { PolymorphicComponentProps } from '@/utils/polymorphic';
 import { recursiveCloneChildren } from '@/utils/recursive-clone-children';
 import { tv, type VariantProps } from '@/utils/tv';
-import { RiCloseFill } from 'react-icons/ri';
 
 const TAG_ROOT_NAME = 'TagRoot';
 const TAG_ICON_NAME = 'TagIcon';
@@ -30,7 +29,7 @@ export const tagVariants = tv({
       // base
       'group/dismiss-button -ml-1.5 -mr-1 size-4 shrink-0',
       // focus
-      'focus:outline-none',
+      'focus:outline-hidden',
     ],
     dismissIcon: 'size-4 text-text-soft transition duration-200 ease-out',
   },
@@ -121,6 +120,7 @@ function TagIcon<T extends React.ElementType>({
 
   return <Component className={icon({ class: className })} {...rest} />;
 }
+
 TagIcon.displayName = TAG_ICON_NAME;
 
 type TagDismissButtonProps = TagSharedProps &
@@ -154,23 +154,30 @@ function TagDismissIcon<T extends React.ElementType>({
 
   return <Component className={dismissIcon({ class: className })} {...rest} />;
 }
+
 TagDismissIcon.displayName = TAG_DISMISS_ICON_NAME;
 
 type TagProps = {
   children: React.ReactNode;
   icon?: React.ReactElement;
-  onDismiss?: () => void;
+  onDismiss?: React.MouseEventHandler<HTMLButtonElement>;
   asChild?: boolean;
   className?: string;
+  dismissTestId?: string;
 } & Pick<VariantProps<typeof tagVariants>, 'variant' | 'disabled'>;
 
 const Tag = React.forwardRef<HTMLDivElement, TagProps>(
-  ({ children, icon, onDismiss, asChild, variant, disabled, className }, ref) => {
+  ({ children, icon, onDismiss, asChild, variant, disabled, className, dismissTestId, ...rest }, ref) => {
     return (
-      <TagRoot ref={ref} asChild={asChild} variant={variant} disabled={disabled} className={className}>
-        {icon && <TagIcon as={icon.type} {...icon.props} />}
+      <TagRoot ref={ref} asChild={asChild} variant={variant} disabled={disabled} className={className} {...rest}>
+        {icon && (
+          <TagIcon
+            as={icon.type as React.ElementType | undefined}
+            {...(icon.props as React.HTMLAttributes<HTMLElement>)}
+          />
+        )}
         {children}
-        {onDismiss && <TagDismissButton onClick={onDismiss} disabled={disabled} />}
+        {onDismiss && <TagDismissButton onClick={onDismiss} disabled={disabled} data-testid={dismissTestId} />}
       </TagRoot>
     );
   }

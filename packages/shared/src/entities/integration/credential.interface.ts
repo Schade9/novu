@@ -45,4 +45,16 @@ export interface ICredentials {
   phoneNumberIdentification?: string;
   channelId?: string;
   apiVersion?: string;
+  appSid?: string;
+  senderId?: string;
+  AppIOBaseUrl?: string;
+  AppIOSubscriptionId?: string;
+  AppIOBearerToken?: string;
+  AppIOOriginalSignature?: string;
+  servicePlanId?: string;
+  tenantId?: string;
+  signingSecret?: string;
+  outboundIntegrationId?: string;
+  useFromAddressOverride?: boolean;
+  fromAddressOverride?: string;
 }

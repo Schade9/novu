@@ -1,18 +1,16 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { ActorTypeEnum, ChannelTypeEnum } from '@novu/shared';
 import {
   AnalyticsService,
   buildFeedKey,
   buildSubscriberKey,
-  CachedEntity,
   CachedQuery,
+  CachedResponse,
   InstrumentUsecase,
 } from '@novu/application-generic';
 import { MessageRepository, SubscriberEntity, SubscriberRepository } from '@novu/dal';
-
-import { GetNotificationsFeedCommand } from './get-notifications-feed.command';
-import { ApiException } from '../../../shared/exceptions/api.exception';
+import { ActorTypeEnum, ChannelTypeEnum } from '@novu/shared';
 import { FeedResponseDto } from '../../dtos/feeds-response.dto';
+import { GetNotificationsFeedCommand } from './get-notifications-feed.command';
 
 @Injectable()
 export class GetNotificationsFeed {
@@ -35,14 +33,6 @@ export class GetNotificationsFeed {
   }
 
   @InstrumentUsecase()
-  @CachedQuery({
-    builder: ({ environmentId, subscriberId, ...command }: GetNotificationsFeedCommand) =>
-      buildFeedKey().cache({
-        environmentId,
-        subscriberId,
-        ...command,
-      }),
-  })
   async execute(command: GetNotificationsFeedCommand): Promise<FeedResponseDto> {
     const payload = this.getPayloadObject(command.payload);
 
@@ -52,7 +42,7 @@ export class GetNotificationsFeed {
     });
 
     if (!subscriber) {
-      throw new ApiException(
+      throw new BadRequestException(
         `Subscriber not found for this environment with the id: ${
           command.subscriberId
         }. Make sure to create a subscriber before fetching the feed.`
@@ -116,7 +106,7 @@ export class GetNotificationsFeed {
     };
   }
 
-  @CachedEntity({
+  @CachedResponse({
     builder: (command: { subscriberId: string; _environmentId: string }) =>
       buildSubscriberKey({
         _environmentId: command._environmentId,

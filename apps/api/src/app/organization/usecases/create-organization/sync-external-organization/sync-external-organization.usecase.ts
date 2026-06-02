@@ -1,17 +1,16 @@
-/* eslint-disable global-require */
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import { AnalyticsService } from '@novu/application-generic';
-import { OrganizationEntity, OrganizationRepository, UserRepository } from '@novu/dal';
-
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
+import { AnalyticsService, PinoLogger } from '@novu/application-generic';
+import { OrganizationEntity, OrganizationRepository } from '@novu/dal';
+import { ApiAuthSchemeEnum, MemberRoleEnum } from '@novu/shared';
 import { CreateEnvironmentCommand } from '../../../../environments-v1/usecases/create-environment/create-environment.command';
 import { CreateEnvironment } from '../../../../environments-v1/usecases/create-environment/create-environment.usecase';
-import { GetOrganizationCommand } from '../../get-organization/get-organization.command';
-import { GetOrganization } from '../../get-organization/get-organization.usecase';
-
 import { CreateNovuIntegrationsCommand } from '../../../../integrations/usecases/create-novu-integrations/create-novu-integrations.command';
 import { CreateNovuIntegrations } from '../../../../integrations/usecases/create-novu-integrations/create-novu-integrations.usecase';
-import { ApiException } from '../../../../shared/exceptions/api.exception';
+import { UpsertLayout, UpsertLayoutCommand } from '../../../../layouts-v2/usecases/upsert-layout';
+import { createDefaultLayout } from '../../../../layouts-v2/utils/layout-templates';
+import { GetOrganizationCommand } from '../../get-organization/get-organization.command';
+import { GetOrganization } from '../../get-organization/get-organization.usecase';
 import { SyncExternalOrganizationCommand } from './sync-external-organization.command';
 
 // TODO: eventually move to @novu/ee-auth
@@ -29,24 +28,31 @@ export class SyncExternalOrganization {
   constructor(
     private readonly organizationRepository: OrganizationRepository,
     private readonly getOrganizationUsecase: GetOrganization,
-    private readonly userRepository: UserRepository,
     private readonly createEnvironmentUsecase: CreateEnvironment,
     private readonly createNovuIntegrations: CreateNovuIntegrations,
+    private readonly upsertLayoutUsecase: UpsertLayout,
     private analyticsService: AnalyticsService,
-    private moduleRef: ModuleRef
-  ) {}
+    private moduleRef: ModuleRef,
+    private logger: PinoLogger
+  ) {
+    this.logger.setContext(this.constructor.name);
+  }
 
   async execute(command: SyncExternalOrganizationCommand): Promise<OrganizationEntity> {
-    const user = await this.userRepository.findById(command.userId);
-    if (!user) throw new ApiException('User not found');
+    const isSelfHosted = process.env.IS_SELF_HOSTED === 'true';
+    const isEnterprise = process.env.NOVU_ENTERPRISE === 'true' || process.env.CI_EE_TEST === 'true';
 
-    const organization = await this.organizationRepository.create({
-      externalId: command.externalId,
-    });
+    const organization = await this.organizationRepository.create(
+      {
+        externalId: command.externalId,
+        apiServiceLevel: isSelfHosted && isEnterprise ? 'unlimited' : undefined,
+      },
+      { headers: command.headers }
+    );
 
     const devEnv = await this.createEnvironmentUsecase.execute(
       CreateEnvironmentCommand.create({
-        userId: user._id,
+        userId: command.userId,
         name: 'Development',
         organizationId: organization._id,
         system: true,
@@ -57,13 +63,31 @@ export class SyncExternalOrganization {
       CreateNovuIntegrationsCommand.create({
         environmentId: devEnv._id,
         organizationId: devEnv._organizationId,
-        userId: user._id,
+        userId: command.userId,
+        name: devEnv.name,
+      })
+    );
+
+    await this.upsertLayoutUsecase.execute(
+      UpsertLayoutCommand.create({
+        environmentId: devEnv._id,
+        organizationId: devEnv._organizationId,
+        userId: command.userId,
+        layoutDto: {
+          name: 'Default layout',
+          controlValues: {
+            email: {
+              body: JSON.stringify(createDefaultLayout(organization.name)),
+              editorType: 'block',
+            },
+          },
+        },
       })
     );
 
     const prodEnv = await this.createEnvironmentUsecase.execute(
       CreateEnvironmentCommand.create({
-        userId: user._id,
+        userId: command.userId,
         name: 'Production',
         organizationId: organization._id,
         parentEnvironmentId: devEnv._id,
@@ -75,13 +99,31 @@ export class SyncExternalOrganization {
       CreateNovuIntegrationsCommand.create({
         environmentId: prodEnv._id,
         organizationId: prodEnv._organizationId,
-        userId: user._id,
+        userId: command.userId,
+        name: prodEnv.name,
       })
     );
 
-    this.analyticsService.upsertGroup(organization._id, organization, user);
+    await this.upsertLayoutUsecase.execute(
+      UpsertLayoutCommand.create({
+        environmentId: prodEnv._id,
+        organizationId: prodEnv._organizationId,
+        userId: command.userId,
+        layoutDto: {
+          name: 'Default layout',
+          controlValues: {
+            email: {
+              body: JSON.stringify(createDefaultLayout(organization.name)),
+              editorType: 'block',
+            },
+          },
+        },
+      })
+    );
 
-    this.analyticsService.track('[Authentication] - Create Organization', user._id, {
+    this.analyticsService.upsertGroup(organization._id, organization, { _id: command.userId });
+
+    this.analyticsService.track('[Authentication] - Create Organization', command.userId, {
       _organization: organization._id,
     });
 
@@ -93,28 +135,67 @@ export class SyncExternalOrganization {
     );
 
     if (organizationAfterChanges !== null) {
-      await this.startFreeTrial(user._id, organizationAfterChanges._id);
+      await this.createCustomer(command.email, organizationAfterChanges._id);
+    }
+
+    const domain = organization.domain || this.extractDomainFromEmail(command.email);
+    if (domain) {
+      this.triggerBrandEnrichment(command.userId, organization._id, devEnv._id, domain).catch((error) =>
+        this.logger.error(error, 'Failed to trigger brand enrichment (fire-and-forget)')
+      );
     }
 
     return organizationAfterChanges as OrganizationEntity;
   }
 
-  private async startFreeTrial(userId: string, organizationId: string) {
+  private extractDomainFromEmail(email: string): string | null {
+    const parts = email.split('@');
+    if (parts.length !== 2) return null;
+
+    return parts[1];
+  }
+
+  private async triggerBrandEnrichment(
+    userId: string,
+    organizationId: string,
+    environmentId: string,
+    domain: string
+  ): Promise<void> {
+    try {
+      const enrichUsecase = this.moduleRef.get('EnrichOrganizationBrand', { strict: false });
+
+      await enrichUsecase.execute({
+        user: {
+          _id: userId,
+          organizationId,
+          environmentId,
+          roles: [MemberRoleEnum.ADMIN],
+          permissions: [],
+          scheme: ApiAuthSchemeEnum.BEARER,
+        },
+        domain,
+      });
+    } catch (error) {
+      this.logger.warn({ err: error }, `EnrichOrganizationBrand has failed for ${domain}, skipping`);
+    }
+  }
+
+  private async createCustomer(billingEmail: string, organizationId: string) {
     try {
       if (process.env.NOVU_ENTERPRISE === 'true' || process.env.CI_EE_TEST === 'true') {
-        if (!require('@novu/ee-billing')?.StartReverseFreeTrial) {
+        if (!require('@novu/ee-billing')?.GetOrCreateCustomer) {
           throw new BadRequestException('Billing module is not loaded');
         }
-        const usecase = this.moduleRef.get(require('@novu/ee-billing')?.StartReverseFreeTrial, {
+        const usecase = this.moduleRef.get(require('@novu/ee-billing')?.GetOrCreateCustomer, {
           strict: false,
         });
         await usecase.execute({
-          userId,
           organizationId,
+          billingEmail,
         });
       }
     } catch (e) {
-      Logger.error(e, `Unexpected error while importing enterprise modules`, 'StartReverseFreeTrial');
+      this.logger.error({ err: e }, `Unexpected error while importing enterprise modules`);
     }
   }
 }

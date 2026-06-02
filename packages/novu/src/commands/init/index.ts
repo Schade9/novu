@@ -1,12 +1,12 @@
-import { cyan, green, red, bold } from 'picocolors';
-import path from 'path';
-import prompts from 'prompts';
-import type { InitialReturnValue } from 'prompts';
 import fs from 'fs';
-import { createApp } from './create-app';
-import { validateNpmName } from './helpers/validate-pkg';
-import { isFolderEmpty } from './helpers/is-folder-empty';
+import path from 'path';
+import { bold, cyan, green, red } from 'picocolors';
+import type { InitialReturnValue } from 'prompts';
+import prompts from 'prompts';
 import { AnalyticService } from '../../services/analytics.service';
+import { createApp } from './create-app';
+import { isFolderEmpty } from './helpers/is-folder-empty';
+import { validateNpmName } from './helpers/validate-pkg';
 
 const analytics = new AnalyticService();
 
@@ -28,6 +28,8 @@ export interface IInitCommandOptions {
   secretKey?: string;
   projectPath?: string;
   apiUrl: string;
+  template?: string;
+  agentIdentifier?: string;
 }
 
 export async function init(program: IInitCommandOptions, anonymousId?: string): Promise<void> {
@@ -48,19 +50,19 @@ export async function init(program: IInitCommandOptions, anonymousId?: string): 
   }
 
   if (!projectPath) {
+    const defaultName = program.agentIdentifier || 'my-novu-app';
     const res = await prompts({
       onState: onPromptState,
       type: 'text',
       name: 'path',
       message: 'What is your project named?',
-      initial: 'my-novu-app',
+      initial: defaultName,
       validate: (name: string) => {
         const validation = validateNpmName(path.basename(path.resolve(name)));
         if (validation.valid) {
           return true;
         }
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         return `Invalid project name: ${(validation as any).problems[0]}`;
       },
     });
@@ -88,8 +90,9 @@ export async function init(program: IInitCommandOptions, anonymousId?: string): 
   if (!validation.valid) {
     console.error(`Could not create a project called ${red(`"${projectName}"`)} because of npm naming restrictions:`);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (validation as any).problems.forEach((problem: string) => console.error(`    ${red(bold('*'))} ${problem}`));
+    (validation as any).problems.forEach((problem: string) => {
+      console.error(`    ${red(bold('*'))} ${problem}`);
+    });
     process.exit(1);
   }
 
@@ -97,7 +100,6 @@ export async function init(program: IInitCommandOptions, anonymousId?: string): 
   let userId: string;
   // if no secret key is supplied set to empty string
   if (!program.secretKey) {
-    // eslint-disable-next-line no-param-reassign
     program.secretKey = '';
   } else {
     try {
@@ -130,7 +132,6 @@ export async function init(program: IInitCommandOptions, anonymousId?: string): 
       });
     } catch (error) {
       console.error(
-        // eslint-disable-next-line max-len
         `Failed to verify your secret key against ${program.apiUrl}. For EU instances use --api-url https://eu.api.novu.co or provide the correct secret key`
       );
 
@@ -150,11 +151,36 @@ export async function init(program: IInitCommandOptions, anonymousId?: string): 
     process.exit(1);
   }
 
+  const supportedTemplates = ['notifications', 'agent'] as const;
+  let templateChoice = program.template;
+
+  if (templateChoice && !supportedTemplates.includes(templateChoice as (typeof supportedTemplates)[number])) {
+    console.error(`Invalid template "${program.template}". Supported templates: ${supportedTemplates.join(', ')}`);
+    process.exit(1);
+  }
+
+  if (!templateChoice) {
+    const res = await prompts({
+      onState: onPromptState,
+      type: 'select',
+      name: 'template',
+      message: 'What type of Novu app do you want to create?',
+      choices: [
+        { title: 'Notifications', value: 'notifications', description: 'Workflows, email templates, and in-app inbox' },
+        { title: 'Agent', value: 'agent', description: 'Conversational AI agent with chat platform support' },
+      ],
+      initial: 0,
+    });
+
+    templateChoice = res.template;
+  }
+
+  if (!templateChoice) {
+    console.error('No template selected.');
+    process.exit(1);
+  }
+
   const preferences = {} as Record<string, boolean | string>;
-  /**
-   * If the user does not provide the necessary flags, prompt them for whether
-   * to use TS or JS.
-   */
   const defaults: typeof preferences = {
     typescript: true,
     eslint: true,
@@ -177,13 +203,16 @@ export async function init(program: IInitCommandOptions, anonymousId?: string): 
   await createApp({
     appPath: resolvedProjectPath,
     packageManager: 'npm',
+    templateChoice,
     typescript: defaults.typescript as boolean,
     eslint: defaults.eslint as boolean,
     srcDir: defaults.srcDir as boolean,
     importAlias: defaults.importAlias as string,
     secretKey: program.secretKey,
+    apiUrl: program.apiUrl,
     applicationId,
     userId,
+    agentIdentifier: program.agentIdentifier,
   });
 
   if (userId || anonymousId) {

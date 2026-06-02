@@ -1,8 +1,17 @@
+import { EnvironmentRepository } from '@novu/dal';
+import { ApiServiceLevelEnum, EnvironmentTypeEnum, FeatureFlagsKeysEnum, NOVU_ENCRYPTION_SUB_MASK } from '@novu/shared';
+import { UserSession } from '@novu/testing';
 import { expect } from 'chai';
 
-import { EnvironmentRepository } from '@novu/dal';
-import { UserSession } from '@novu/testing';
-import { NOVU_ENCRYPTION_SUB_MASK } from '@novu/shared';
+async function createEnv(name: string, session) {
+  const demoEnvironment = {
+    name,
+    color: '#3A7F5C',
+  };
+  const { body } = await session.testAgent.post('/v1/environments').send(demoEnvironment);
+
+  return { demoEnvironment, body };
+}
 
 describe('Create Environment - /environments (POST)', async () => {
   let session: UserSession;
@@ -12,11 +21,13 @@ describe('Create Environment - /environments (POST)', async () => {
     await session.initialize({
       noEnvironment: true,
     });
+    session.updateOrganizationServiceLevel(ApiServiceLevelEnum.BUSINESS);
   });
 
   it('should create environment entity correctly', async () => {
     const demoEnvironment = {
       name: 'Hello App',
+      color: '#3A7F5C',
     };
     const { body } = await session.testAgent.post('/v1/environments').send(demoEnvironment).expect(201);
 
@@ -36,6 +47,78 @@ describe('Create Environment - /environments (POST)', async () => {
     expect(dbApp.apiKeys[0]._userId).to.equal(session.user._id);
   });
 
+  it('should create environment with correct default type', async () => {
+    const demoEnvironment = {
+      name: 'Test Environment',
+      color: '#3A7F5C',
+    };
+    const { body } = await session.testAgent.post('/v1/environments').send(demoEnvironment).expect(201);
+
+    expect(body.data.name).to.eq(demoEnvironment.name);
+    expect(body.data.type).to.eq(EnvironmentTypeEnum.PROD);
+
+    const dbApp = await environmentRepository.findOne({ _id: body.data._id });
+    expect(dbApp?.type).to.equal(EnvironmentTypeEnum.PROD);
+  });
+
+  it('should create Development environment with DEV type', async () => {
+    const demoEnvironment = {
+      name: 'Development',
+      color: '#3A7F5C',
+    };
+    const { body } = await session.testAgent.post('/v1/environments').send(demoEnvironment).expect(201);
+
+    expect(body.data.name).to.eq(demoEnvironment.name);
+    expect(body.data.type).to.eq(EnvironmentTypeEnum.DEV);
+
+    const dbApp = await environmentRepository.findOne({ _id: body.data._id });
+    expect(dbApp?.type).to.equal(EnvironmentTypeEnum.DEV);
+  });
+
+  it('should create Production environment with PROD type', async () => {
+    const demoEnvironment = {
+      name: 'Production',
+      color: '#3A7F5C',
+    };
+    const { body } = await session.testAgent.post('/v1/environments').send(demoEnvironment).expect(201);
+
+    expect(body.data.name).to.eq(demoEnvironment.name);
+    expect(body.data.type).to.eq(EnvironmentTypeEnum.PROD);
+
+    const dbApp = await environmentRepository.findOne({ _id: body.data._id });
+    expect(dbApp?.type).to.equal(EnvironmentTypeEnum.PROD);
+  });
+
+  it('should default custom environments to PROD type', async () => {
+    const demoEnvironment = {
+      name: 'Staging Environment',
+      color: '#3A7F5C',
+    };
+    const { body } = await session.testAgent.post('/v1/environments').send(demoEnvironment).expect(201);
+
+    expect(body.data.name).to.eq(demoEnvironment.name);
+    expect(body.data.type).to.eq(EnvironmentTypeEnum.PROD);
+
+    const dbApp = await environmentRepository.findOne({ _id: body.data._id });
+    expect(dbApp?.type).to.equal(EnvironmentTypeEnum.PROD);
+  });
+
+  it('should apply default type to existing environments without type field', async () => {
+    // Create an environment and manually remove the type field to simulate old data
+    const demoEnvironment = {
+      name: 'Legacy Environment',
+      color: '#3A7F5C',
+    };
+    const { body } = await session.testAgent.post('/v1/environments').send(demoEnvironment).expect(201);
+
+    // Manually remove the type field to simulate legacy data
+    await environmentRepository.update({ _id: body.data._id }, { $unset: { type: 1 } });
+
+    // Fetch the environment - should have default type applied
+    const fetchedEnv = await environmentRepository.findOne({ _id: body.data._id });
+    expect(fetchedEnv?.type).to.equal(EnvironmentTypeEnum.PROD);
+  });
+
   it('should fail when no name provided', async () => {
     const demoEnvironment = {};
     const { body } = await session.testAgent.post('/v1/environments').send(demoEnvironment).expect(400);
@@ -43,7 +126,7 @@ describe('Create Environment - /environments (POST)', async () => {
     expect(body.message[0]).to.contain('name should not be null');
   });
 
-  it('should create a default layout for environment', async function () {
+  it('should create a default layout for environment', async () => {
     const demoEnvironment = {
       name: 'Hello App',
     };
@@ -58,7 +141,7 @@ describe('Create Environment - /environments (POST)', async () => {
     expect(layouts.data[0].content.length).to.be.greaterThan(20);
   });
 
-  it('should not set apiRateLimits field on environment by default', async function () {
+  it('should not set apiRateLimits field on environment by default', async () => {
     const demoEnvironment = {
       name: 'Hello App',
     };

@@ -1,6 +1,6 @@
 import { DEFAULT_WORKFLOW_PREFERENCES } from '../consts';
 import { IPreferenceChannels } from '../entities/subscriber-preference';
-import { ChannelTypeEnum, WorkflowPreferencesPartial, WorkflowPreferences } from '../types';
+import { ChannelTypeEnum, WorkflowPreference, WorkflowPreferences, WorkflowPreferencesPartial } from '../types';
 
 /**
  * Given any partial input of preferences, output a complete preferences object that:
@@ -9,7 +9,7 @@ import { ChannelTypeEnum, WorkflowPreferencesPartial, WorkflowPreferences } from
  * - Lastly, uses the defaults we've defined
  */
 export const buildWorkflowPreferences = (
-  inputPreferences: WorkflowPreferencesPartial | undefined,
+  inputPreferences: WorkflowPreferencesPartial | undefined | null,
   defaultPreferences: WorkflowPreferences = DEFAULT_WORKFLOW_PREFERENCES
 ): WorkflowPreferences => {
   if (!inputPreferences) {
@@ -25,7 +25,8 @@ export const buildWorkflowPreferences = (
     ...defaultPreferences,
     all: {
       ...defaultPreferences.all,
-      ...inputPreferences.all,
+      // DeepPartial loosens json-logic types; assert back to the concrete workflow preference before merging.
+      ...(inputPreferences.all as WorkflowPreference),
     },
     channels: {
       ...defaultPreferences.channels,

@@ -1,12 +1,14 @@
 import { DalService } from '@novu/dal';
+import { PinoLogger } from 'nestjs-pino';
 import {
   AnalyticsService,
   CacheInMemoryProviderService,
   CacheService,
-  DistributedLockService,
+  ClickHouseBatchService,
+  ClickHouseService,
   FeatureFlagsService,
+  QueueBaseService,
 } from '../services';
-import { GetFeatureFlag } from '../usecases';
 
 export const featureFlagsService = {
   provide: FeatureFlagsService,
@@ -16,18 +18,6 @@ export const featureFlagsService = {
 
     return instance;
   },
-};
-
-export const getFeatureFlag = {
-  provide: GetFeatureFlag,
-  useFactory: async (
-    featureFlagsServiceItem: FeatureFlagsService,
-  ): Promise<GetFeatureFlag> => {
-    const useCase = new GetFeatureFlag(featureFlagsServiceItem);
-
-    return useCase;
-  },
-  inject: [FeatureFlagsService],
 };
 
 export const cacheInMemoryProviderService = {
@@ -40,8 +30,7 @@ export const cacheInMemoryProviderService = {
 export const cacheService = {
   provide: CacheService,
   useFactory: async (): Promise<CacheService> => {
-    const factoryCacheInMemoryProviderService =
-      cacheInMemoryProviderService.useFactory();
+    const factoryCacheInMemoryProviderService = cacheInMemoryProviderService.useFactory();
 
     const service = new CacheService(factoryCacheInMemoryProviderService);
 
@@ -71,18 +60,20 @@ export const analyticsService = {
   },
 };
 
-export const distributedLockService = {
-  provide: DistributedLockService,
-  useFactory: async (): Promise<DistributedLockService> => {
-    const factoryCacheInMemoryProviderService =
-      cacheInMemoryProviderService.useFactory();
-
-    const service = new DistributedLockService(
-      factoryCacheInMemoryProviderService,
-    );
-
-    await service.initialize();
+export const clickHouseService = {
+  provide: ClickHouseService,
+  useFactory: async () => {
+    const service = new ClickHouseService();
+    await service.init();
 
     return service;
   },
+};
+
+export const clickHouseBatchService = {
+  provide: ClickHouseBatchService,
+  useFactory: async (clickhouseService: ClickHouseService, logger: PinoLogger, queueServices?: QueueBaseService[]) => {
+    return new ClickHouseBatchService(clickhouseService, logger, queueServices || []);
+  },
+  inject: [ClickHouseService, PinoLogger, { token: 'BULLMQ_LIST', optional: true }],
 };

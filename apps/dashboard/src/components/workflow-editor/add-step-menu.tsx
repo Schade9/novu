@@ -1,13 +1,17 @@
-import { STEP_TYPE_TO_COLOR } from '@/utils/color';
-import { StepTypeEnum } from '@/utils/enums';
-import { cn } from '@/utils/ui';
 import { PopoverPortal } from '@radix-ui/react-popover';
 import React, { ReactNode, useState } from 'react';
 import { RiAddLine } from 'react-icons/ri';
+import { STEP_TYPE_TO_COLOR } from '@/utils/color';
+import { StepTypeEnum } from '@/utils/enums';
+import { cn } from '@/utils/ui';
 import { STEP_TYPE_TO_ICON } from '../icons/utils';
 import { Badge } from '../primitives/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '../primitives/popover';
 import { Node } from './base-node';
+
+export type AddStepMenuSelection = {
+  type: StepTypeEnum;
+};
 
 const noop = () => {};
 
@@ -32,69 +36,84 @@ const MenuItem = ({
   stepType,
   disabled,
   onClick,
+  iconOverride,
 }: {
   children: ReactNode;
   stepType: StepTypeEnum;
   disabled?: boolean;
-  onClick?: React.MouseEventHandler<HTMLSpanElement>;
+  onClick?: React.MouseEventHandler<HTMLButtonElement>;
+  iconOverride?: React.ReactNode;
 }) => {
   const Icon = STEP_TYPE_TO_ICON[stepType];
   const color = STEP_TYPE_TO_COLOR[stepType];
 
   return (
-    <span
+    <button
+      type="button"
+      disabled={disabled}
       onClick={!disabled ? onClick : noop}
       className={cn(
-        'shadow-xs text-foreground-600 hover:bg-accent flex cursor-pointer items-center gap-2 rounded-lg p-1.5',
+        'shadow-xs text-foreground-600 hover:bg-accent flex cursor-pointer items-center gap-2 rounded-lg p-1.5 text-left',
         {
           'text-foreground-300 cursor-not-allowed': disabled,
         }
       )}
+      data-testid={`add-step-menu-item-${stepType}`}
     >
-      <Icon
-        className={`bg-neutral-alpha-50 h-6 w-6 rounded-md p-1 opacity-40`}
-        style={{
-          color: `hsl(var(--${color}))`,
-        }}
-      />
+      {iconOverride ?? (
+        <Icon
+          className={`bg-neutral-alpha-50 h-6 w-6 rounded-md p-1 opacity-40`}
+          style={{
+            color: `hsl(var(--${color}))`,
+          }}
+        />
+      )}
       <span className="text-xs">{children}</span>
       {disabled && (
         <Badge color="gray" size="md" variant="lighter">
           coming soon
         </Badge>
       )}
-    </span>
+    </button>
   );
 };
 
 export const AddStepMenu = ({
+  disabled = false,
   visible = false,
+  className,
   onMenuItemClick,
 }: {
+  disabled?: boolean;
   visible?: boolean;
-  onMenuItemClick: (stepType: StepTypeEnum) => void;
+  className?: string;
+  onMenuItemClick: (selection: AddStepMenuSelection) => void;
 }) => {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
 
   const handleMenuItemClick = (stepType: StepTypeEnum) => {
-    onMenuItemClick(stepType);
+    onMenuItemClick({ type: stepType });
     setIsPopoverOpen(false);
   };
 
   return (
     <Popover
-      open={isPopoverOpen}
+      open={isPopoverOpen && !disabled}
       onOpenChange={(newIsOpen) => {
         setIsPopoverOpen(newIsOpen);
       }}
     >
-      <PopoverTrigger asChild>
-        <span>
+      <PopoverTrigger asChild disabled={disabled}>
+        <span data-testid="add-step-menu-button">
           <Node
             variant="sm"
-            className={cn('opacity-0 transition duration-300 ease-out hover:opacity-100', {
-              'opacity-100': isPopoverOpen || visible,
-            })}
+            className={cn(
+              'opacity-0 transition duration-300 ease-out hover:opacity-100',
+              {
+                'opacity-100': isPopoverOpen || visible,
+              },
+              className
+            )}
           >
             <RiAddLine className="h-4 w-4" />
           </Node>
@@ -135,6 +154,15 @@ export const AddStepMenu = ({
                 </MenuItem>
                 <MenuItem stepType={StepTypeEnum.DIGEST} onClick={() => handleMenuItemClick(StepTypeEnum.DIGEST)}>
                   Digest
+                </MenuItem>
+                <MenuItem stepType={StepTypeEnum.THROTTLE} onClick={() => handleMenuItemClick(StepTypeEnum.THROTTLE)}>
+                  Throttle
+                </MenuItem>
+                <MenuItem
+                  stepType={StepTypeEnum.HTTP_REQUEST}
+                  onClick={() => handleMenuItemClick(StepTypeEnum.HTTP_REQUEST)}
+                >
+                  HTTP Request
                 </MenuItem>
               </MenuItemsGroup>
             </MenuGroup>

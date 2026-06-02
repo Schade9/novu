@@ -1,9 +1,6 @@
-/* eslint-disable global-require */
-import sinon from 'sinon';
+import { ApiServiceLevelEnum, StripeBillingIntervalEnum } from '@novu/shared';
 import { expect } from 'chai';
-import { ApiServiceLevelEnum } from '@novu/shared';
-// eslint-disable-next-line no-restricted-imports
-import { StripeBillingIntervalEnum } from '@novu/ee-billing/src/stripe/types';
+import sinon from 'sinon';
 
 describe('GetPrices #novu-v2', () => {
   const eeBilling = require('@novu/ee-billing');
@@ -34,7 +31,9 @@ describe('GetPrices #novu-v2', () => {
     listPricesStub.reset();
   });
 
-  const createUseCase = () => new GetPrices(stripeStub as any);
+  const createUseCase = () => new GetPrices(stripeStub);
+
+  const freeMeteredPriceLookupKey = ['free_usage_notifications_10k'];
 
   const expectedPrices = [
     {
@@ -42,7 +41,23 @@ describe('GetPrices #novu-v2', () => {
       billingInterval: StripeBillingIntervalEnum.MONTH,
       prices: {
         licensed: ['free_flat_monthly'],
-        metered: ['free_usage_notifications'],
+        metered: freeMeteredPriceLookupKey,
+      },
+    },
+    {
+      apiServiceLevel: ApiServiceLevelEnum.PRO,
+      billingInterval: StripeBillingIntervalEnum.MONTH,
+      prices: {
+        licensed: ['pro_flat_monthly'],
+        metered: ['pro_usage_notifications'],
+      },
+    },
+    {
+      apiServiceLevel: ApiServiceLevelEnum.PRO,
+      billingInterval: StripeBillingIntervalEnum.YEAR,
+      prices: {
+        licensed: ['pro_flat_annually'],
+        metered: ['pro_usage_notifications'],
       },
     },
     {
@@ -90,6 +105,7 @@ describe('GetPrices #novu-v2', () => {
               GetPricesCommand.create({
                 apiServiceLevel,
                 billingInterval,
+                organizationId: 'system',
               })
             );
 
@@ -106,7 +122,9 @@ describe('GetPrices #novu-v2', () => {
         });
       };
     })
-    .forEach((test) => test());
+    .forEach((test) => {
+      test();
+    });
 
   it(`should throw an error if no prices are found`, async () => {
     listPricesStub.onFirstCall().resolves({ data: [] });
@@ -118,6 +136,7 @@ describe('GetPrices #novu-v2', () => {
         GetPricesCommand.create({
           apiServiceLevel: ApiServiceLevelEnum.BUSINESS,
           billingInterval: StripeBillingIntervalEnum.MONTH,
+          organizationId: 'system',
         })
       );
     } catch (e) {

@@ -1,8 +1,8 @@
 {
   "name": "@novu/js",
-  "version": "2.6.4",
+  "version": "3.16.0",
   "repository": "https://github.com/novuhq/novu",
-  "description": "Novu's JavaScript SDK for building custom inbox notification experiences",
+  "description": "Novu JavaScript SDK for <Inbox />",
   "author": "",
   "license": "ISC",
   "main": "dist/cjs/index.js",
@@ -68,15 +68,17 @@
   "scripts": {
     "clean": "rimraf ./dist",
     "start:server": "http-server ./dist -p 4010",
+    "prebuild": "cp ./src/ui/index.css ./src/ui/index.directcss",
     "build": "pnpm run clean && NODE_ENV=production tsup",
-    "postbuild": "./scripts/copy-package-json.sh && node scripts/size-limit.mjs && pnpm run check-exports",
+    "postbuild": "rm ./src/ui/index.directcss && ./scripts/copy-package-json.sh && node scripts/size-limit.mjs && pnpm run check-exports",
     "build:umd": "webpack --config webpack.config.cjs",
-    "build:watch": "concurrently \"pnpm run tsup:watch\" \"pnpm run start:server\"",
-    "tsup:watch": "tsup --watch",
+    "build:watch": "concurrently \"pnpm run prebuild\" \"NODE_ENV=development pnpm run tsup:watch\" \"pnpm run start:server\"",
+    "tsup:watch": "tsup --watch --onSuccess 'tsup --dts-only'",
     "check-exports": "attw --pack .",
-    "lint": "eslint src",
-    "lint:fix": "pnpm lint -- --fix",
-    "test": "jest"
+    "check": "biome check .",
+    "check:fix": "biome check --write .",
+    "test": "jest",
+    "publish:rc": "pnpm publish --tag rc"
   },
   "browserslist": {
     "production": [
@@ -91,9 +93,9 @@
     ]
   },
   "devDependencies": {
-    "@arethetypeswrong/cli": "^0.16.4",
+    "@arethetypeswrong/cli": "^0.17.4",
     "@types/jest": "^29.2.3",
-    "@types/node": "^20.15.0",
+    "@types/node": "^22.0.0",
     "autoprefixer": "^10.4.0",
     "bytes-iec": "^3.1.1",
     "chalk": "^5.3.0",
@@ -109,8 +111,7 @@
     "postcss-load-config": "^6.0.1",
     "postcss-prefix-selector": "^1.16.1",
     "postcss-preset-env": "^9.5.14",
-    "prettier-plugin-tailwindcss": "^0.6.5",
-    "solid-devtools": "^0.29.2",
+    "solid-devtools": "^0.30.0",
     "tailwindcss": "^3.4.4",
     "tailwindcss-animate": "^1.0.7",
     "terser-webpack-plugin": "^5.3.9",
@@ -125,14 +126,18 @@
     "webpack-cli": "^5.1.4"
   },
   "dependencies": {
-    "@floating-ui/dom": "^1.6.7",
+    "@floating-ui/dom": "^1.6.13",
+    "@kobalte/core": "^0.13.10",
+    "@types/json-logic-js": "^2.0.8",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
+    "event-target-polyfill": "^0.0.4",
     "mitt": "^3.0.1",
+    "partysocket": "^1.1.4",
     "socket.io-client": "4.7.2",
     "solid-floating-ui": "^0.3.1",
-    "solid-js": "^1.8.11",
-    "solid-motionone": "^1.0.1",
+    "solid-js": "^1.9.4",
+    "solid-motionone": "^1.0.3",
     "tailwind-merge": "^2.4.0"
   },
   "nx": {

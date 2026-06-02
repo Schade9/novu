@@ -1,13 +1,16 @@
-import { IsDefined, IsEnum, IsOptional, IsString, ValidateIf, ValidateNested } from 'class-validator';
+import { IsValidContextPayload } from '@novu/application-generic';
+import { NotificationTemplateEntity } from '@novu/dal';
 import {
   AddressingTypeEnum,
+  ContextPayload,
   StatelessControls,
-  TriggerRecipientsPayload,
+  TriggerOverrides,
   TriggerRecipientSubscriber,
+  TriggerRecipientsPayload,
   TriggerRequestCategoryEnum,
   TriggerTenantContext,
 } from '@novu/shared';
-
+import { IsDefined, IsEnum, IsOptional, IsString, ValidateIf, ValidateNested } from 'class-validator';
 import { EnvironmentWithUserCommand } from '../../../shared/commands/project.command';
 
 export class ParseEventRequestBaseCommand extends EnvironmentWithUserCommand {
@@ -16,10 +19,10 @@ export class ParseEventRequestBaseCommand extends EnvironmentWithUserCommand {
   identifier: string;
 
   @IsDefined()
-  payload: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  payload: any;
 
   @IsDefined()
-  overrides: Record<string, Record<string, unknown>>;
+  overrides: TriggerOverrides;
 
   @IsString()
   @IsOptional()
@@ -50,6 +53,19 @@ export class ParseEventRequestBaseCommand extends EnvironmentWithUserCommand {
    * @optional
    */
   controls?: StatelessControls;
+
+  @IsString()
+  requestId: string;
+
+  @IsOptional()
+  workflow?: Pick<NotificationTemplateEntity, '_id' | 'active' | 'payloadSchema' | 'validatePayload'>;
+
+  @IsOptional()
+  @IsValidContextPayload({ maxCount: 5 })
+  context?: ContextPayload;
+
+  @IsOptional()
+  skipQueueInsertion?: boolean;
 }
 
 export class ParseEventRequestMulticastCommand extends ParseEventRequestBaseCommand {

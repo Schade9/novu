@@ -13,27 +13,39 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-
-import { HttpHeaderKeysEnum } from '@novu/framework/internal';
-import { ControlValuesLevelEnum, UserSessionData, WorkflowOriginEnum, WorkflowTypeEnum } from '@novu/shared';
-import { AnalyticsService, ExternalApiAccessible, UserAuthGuard, UserSession } from '@novu/application-generic';
-import { ControlValuesRepository, EnvironmentRepository, NotificationTemplateRepository } from '@novu/dal';
-
 import { ApiExcludeController } from '@nestjs/swagger';
-
-import { StoreControlValuesCommand, StoreControlValuesUseCase } from './usecases/store-control-values';
-import { PreviewStep, PreviewStepCommand } from './usecases/preview-step';
-import { SyncCommand } from './usecases/sync';
-import { Sync } from './usecases/sync/sync.usecase';
-import { ValidateBridgeUrlRequestDto } from './dtos/validate-bridge-url-request.dto';
-import { ValidateBridgeUrlResponseDto } from './dtos/validate-bridge-url-response.dto';
-import { GetBridgeStatus } from './usecases/get-bridge-status/get-bridge-status.usecase';
-import { GetBridgeStatusCommand } from './usecases/get-bridge-status/get-bridge-status.command';
+import {
+  AnalyticsService,
+  ExternalApiAccessible,
+  PreviewStep,
+  PreviewStepCommand,
+  RequirePermissions,
+  SkipPermissionsCheck,
+  UserSession,
+} from '@novu/application-generic';
+import { ControlValuesRepository, EnvironmentRepository, NotificationTemplateRepository } from '@novu/dal';
+import { HttpHeaderKeysEnum } from '@novu/framework/internal';
+import {
+  ControlValuesLevelEnum,
+  PermissionsEnum,
+  ResourceOriginEnum,
+  ResourceTypeEnum,
+  UserSessionData,
+} from '@novu/shared';
+import { RequireAuthentication } from '../auth/framework/auth.decorator';
 import { CreateBridgeRequestDto } from './dtos/create-bridge-request.dto';
 import { CreateBridgeResponseDto } from './dtos/create-bridge-response.dto';
+import { ValidateBridgeUrlRequestDto } from './dtos/validate-bridge-url-request.dto';
+import { ValidateBridgeUrlResponseDto } from './dtos/validate-bridge-url-response.dto';
+import { GetBridgeStatusCommand } from './usecases/get-bridge-status/get-bridge-status.command';
+import { GetBridgeStatus } from './usecases/get-bridge-status/get-bridge-status.usecase';
+import { StoreControlValuesCommand, StoreControlValuesUseCase } from './usecases/store-control-values';
+import { SyncCommand } from './usecases/sync';
+import { Sync } from './usecases/sync/sync.usecase';
 
 @Controller('/bridge')
 @UseInterceptors(ClassSerializerInterceptor)
+@RequireAuthentication()
 @ApiExcludeController()
 export class BridgeController {
   constructor(
@@ -48,7 +60,7 @@ export class BridgeController {
   ) {}
 
   @Get('/status')
-  @UseGuards(UserAuthGuard)
+  @SkipPermissionsCheck()
   async health(@UserSession() user: UserSessionData) {
     return this.getBridgeStatus.execute(
       GetBridgeStatusCommand.create({
@@ -58,7 +70,7 @@ export class BridgeController {
   }
 
   @Post('/preview/:workflowId/:stepId')
-  @UseGuards(UserAuthGuard)
+  @RequirePermissions(PermissionsEnum.WORKFLOW_READ)
   async preview(
     @Param('workflowId') workflowId: string,
     @Param('stepId') stepId: string,
@@ -69,19 +81,19 @@ export class BridgeController {
       PreviewStepCommand.create({
         workflowId,
         stepId,
-        controls: data.controls,
-        payload: data.payload,
+        controls: data?.controls,
+        payload: data?.payload,
         environmentId: user.environmentId,
         organizationId: user.organizationId,
         userId: user._id,
-        workflowOrigin: WorkflowOriginEnum.EXTERNAL,
+        workflowOrigin: ResourceOriginEnum.EXTERNAL,
       })
     );
   }
 
   @Post('/sync')
   @ExternalApiAccessible()
-  @UseGuards(UserAuthGuard)
+  @RequirePermissions(PermissionsEnum.WORKFLOW_WRITE)
   async createBridgesByDiscovery(
     @Headers(HttpHeaderKeysEnum.NOVU_ANONYMOUS) anonymousId: string,
     @UserSession() user: UserSessionData,
@@ -106,7 +118,7 @@ export class BridgeController {
 
   @Post('/diff')
   @ExternalApiAccessible()
-  @UseGuards(UserAuthGuard)
+  @RequirePermissions(PermissionsEnum.WORKFLOW_READ)
   async createDiscoverySoft(
     @Headers(HttpHeaderKeysEnum.NOVU_ANONYMOUS) anonymousId: string,
     @UserSession() user: UserSessionData,
@@ -131,7 +143,7 @@ export class BridgeController {
     const templates = await this.notificationTemplateRepository.find({
       _environmentId: user.environmentId,
       type: {
-        $in: [WorkflowTypeEnum.ECHO, WorkflowTypeEnum.BRIDGE],
+        $in: [ResourceTypeEnum.ECHO, ResourceTypeEnum.BRIDGE],
       },
     });
 
@@ -148,7 +160,7 @@ export class BridgeController {
 
   @Get('/controls/:workflowId/:stepId')
   @ExternalApiAccessible()
-  @UseGuards(UserAuthGuard)
+  @RequirePermissions(PermissionsEnum.WORKFLOW_READ)
   async getControls(
     @UserSession() user: UserSessionData,
     @Param('workflowId') workflowId: string,
@@ -156,7 +168,9 @@ export class BridgeController {
   ) {
     const workflowExist = await this.notificationTemplateRepository.findByTriggerIdentifier(
       user.environmentId,
-      workflowId
+      workflowId,
+      undefined,
+      false
     );
     if (!workflowExist) {
       throw new NotFoundException('Workflow not found');
@@ -180,7 +194,7 @@ export class BridgeController {
 
   @Put('/controls/:workflowId/:stepId')
   @ExternalApiAccessible()
-  @UseGuards(UserAuthGuard)
+  @RequirePermissions(PermissionsEnum.WORKFLOW_WRITE)
   async createControls(
     @Param('workflowId') workflowId: string,
     @Param('stepId') stepId: string,
@@ -191,7 +205,7 @@ export class BridgeController {
       StoreControlValuesCommand.create({
         stepId,
         workflowId,
-        controlValues: body.variables,
+        controlValues: body?.variables,
         environmentId: user.environmentId,
         organizationId: user.organizationId,
         userId: user._id,
@@ -201,7 +215,7 @@ export class BridgeController {
 
   @Post('/validate')
   @ExternalApiAccessible()
-  @UseGuards(UserAuthGuard)
+  @RequirePermissions(PermissionsEnum.BRIDGE_WRITE)
   async validateBridgeUrl(
     @UserSession() user: UserSessionData,
     @Body() body: ValidateBridgeUrlRequestDto

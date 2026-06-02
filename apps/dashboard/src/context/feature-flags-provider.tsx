@@ -1,20 +1,35 @@
+import { AsyncProviderConfig, asyncWithLDProvider } from 'launchdarkly-react-client-sdk';
 import { lazy, Suspense } from 'react';
-import { asyncWithLDProvider } from 'launchdarkly-react-client-sdk';
-import { LAUNCH_DARKLY_CLIENT_SIDE_ID } from '@/config';
+import { IS_ENTERPRISE, IS_SELF_HOSTED, LAUNCH_DARKLY_CLIENT_SIDE_ID } from '@/config';
+import { detectRegionFromURL, getRegionConfig } from '@/context/region';
 
-const LD_CONFIG = {
+function getAwsRegion(): string {
+  const currentRegion = detectRegionFromURL();
+  const regionConfig = getRegionConfig(currentRegion);
+  return regionConfig?.awsRegion || '';
+}
+
+const awsRegion = getAwsRegion();
+
+const LD_CONFIG: AsyncProviderConfig = {
   clientSideID: LAUNCH_DARKLY_CLIENT_SIDE_ID,
   reactOptions: {
     useCamelCaseFlagKeys: false,
   },
   context: {
-    kind: 'user',
-    anonymous: true,
+    kind: 'multi',
+    user: {
+      anonymous: true,
+    },
+    region: {
+      key: awsRegion || 'unknown',
+      awsRegion: awsRegion,
+    },
   },
   options: {
     bootstrap: 'localStorage',
   },
-} as const;
+};
 
 const AsyncFeatureFlagsProvider = lazy(async () => {
   if (!LAUNCH_DARKLY_CLIENT_SIDE_ID) {

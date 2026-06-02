@@ -1,11 +1,11 @@
+import { randomUUID } from 'node:crypto';
+import { Test } from '@nestjs/testing';
+import { CacheService, MockCacheService } from '@novu/application-generic';
+import { GetEventResourceUsage, GetSubscription } from '@novu/ee-billing';
+import { ApiServiceLevelEnum, GetSubscriptionDto } from '@novu/shared';
 import { UserSession } from '@novu/testing';
 import { expect } from 'chai';
 import sinon from 'sinon';
-import { Test } from '@nestjs/testing';
-import { CacheService, MockCacheService } from '@novu/application-generic';
-import { ApiServiceLevelEnum, GetSubscriptionDto } from '@novu/shared';
-import { GetEventResourceUsage, GetPlatformNotificationUsage, GetSubscription } from '@novu/ee-billing';
-import { randomUUID } from 'node:crypto';
 import { AppModule } from '../../../app.module';
 
 describe('GetEventResourceUsage #novu-v2', async () => {
@@ -33,6 +33,7 @@ describe('GetEventResourceUsage #novu-v2', async () => {
       isActive: true,
       daysTotal: 0,
     },
+    cancelAt: null,
   };
 
   beforeEach(async () => {
@@ -70,7 +71,6 @@ describe('GetEventResourceUsage #novu-v2', async () => {
         start: 1609459200000,
         reset: 1612137600000,
         apiServiceLevel: ApiServiceLevelEnum.BUSINESS,
-        locked: true,
       });
     });
 
@@ -96,7 +96,6 @@ describe('GetEventResourceUsage #novu-v2', async () => {
         start: 1609459200000,
         reset: 1612137600000,
         apiServiceLevel: ApiServiceLevelEnum.BUSINESS,
-        locked: true,
       });
     });
   });

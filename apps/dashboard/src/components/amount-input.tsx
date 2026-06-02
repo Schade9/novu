@@ -33,6 +33,7 @@ type InputWithSelectProps = {
   min?: number;
   showError?: boolean;
   shouldUnregister?: boolean;
+  dataTestId?: string;
 };
 
 const AmountInputContainer = ({
@@ -56,6 +57,7 @@ const AmountInputField = ({
   disabled,
   onChange,
   onBlur,
+  dataTestId,
 }: {
   value?: string | number;
   placeholder?: string;
@@ -63,11 +65,12 @@ const AmountInputField = ({
   min?: number;
   onChange: (arg: string | number) => void;
   onBlur?: FocusEventHandler<HTMLInputElement>;
+  dataTestId?: string;
 }) => {
   return (
     <InputPure
       type="number"
-      className="font-code h-[28px] min-w-[40px] border-0 border-r-0 pl-2 shadow-none ring-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+      className="font-code h-[28px] min-w-[40px] border-0 border-r-0 pl-2 shadow-none ring-0 mask-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
       placeholder={placeholder}
       disabled={disabled}
       value={value}
@@ -87,6 +90,7 @@ const AmountInputField = ({
       }}
       min={min}
       onBlur={onBlur}
+      data-testid={dataTestId}
       {...AUTOCOMPLETE_PASSWORD_MANAGERS_OFF}
     />
   );
@@ -145,6 +149,7 @@ const AmountInput = ({
   min,
   showError = true,
   shouldUnregister = false,
+  dataTestId,
 }: InputWithSelectProps) => {
   const { getFieldState, setValue, control } = useFormContext();
 
@@ -171,6 +176,7 @@ const AmountInput = ({
                     onValueChange?.();
                   }}
                   min={min}
+                  dataTestId={dataTestId}
                 />
               </FormControl>
             </FormItem>
@@ -199,7 +205,8 @@ const AmountInput = ({
           )}
         />
       </AmountInputContainer>
-      {showError && <FormMessagePure error={error ? String(error.message) : undefined} />}
+      {/* TODO: Use <FormMessage /> instead, see how we did it in <URLInput /> */}
+      {showError && error && <FormMessagePure hasError>{String(error?.message || '')}</FormMessagePure>}
     </>
   );
 };

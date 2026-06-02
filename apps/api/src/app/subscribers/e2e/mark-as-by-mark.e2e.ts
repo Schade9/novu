@@ -1,7 +1,4 @@
-import { expect } from 'chai';
-import axios from 'axios';
-
-import { UserSession } from '@novu/testing';
+import { Novu } from '@novu/api';
 import {
   MessageEntity,
   MessageRepository,
@@ -10,8 +7,14 @@ import {
   SubscriberRepository,
 } from '@novu/dal';
 import { ChannelTypeEnum, MessagesStatusEnum } from '@novu/shared';
-import { Novu } from '@novu/api';
-import { expectSdkExceptionGeneric, initNovuClassSdk } from '../../shared/helpers/e2e/sdk/e2e-sdk.helper';
+import { UserSession } from '@novu/testing';
+import axios from 'axios';
+import { expect } from 'chai';
+import {
+  expectSdkExceptionGeneric,
+  expectSdkValidationExceptionGeneric,
+  initNovuClassSdk,
+} from '../../shared/helpers/e2e/sdk/e2e-sdk.helper';
 
 const axiosInstance = axios.create();
 
@@ -34,8 +37,8 @@ describe('Mark as Seen - /widgets/messages/mark-as (POST) #novu-v2', async () =>
   });
 
   beforeEach(async () => {
-    await novuClient.trigger({ name: template.triggers[0].identifier, to: subscriberId });
-    await session.awaitRunningJobs(template._id);
+    await novuClient.trigger({ workflowId: template.triggers[0].identifier, to: subscriberId });
+    await session.waitForJobCompletion(template._id);
 
     subscriber = await getSubscriber(session, subscriberRepository, subscriberId);
     message = await getMessage(session, messageRepository, subscriber);
@@ -50,7 +53,7 @@ describe('Mark as Seen - /widgets/messages/mark-as (POST) #novu-v2', async () =>
     await pruneMessages(messageRepository);
   });
 
-  it('should change the seen status', async function () {
+  it('should change the seen status', async () => {
     await novuClient.subscribers.messages.markAllAs(
       {
         messageId: message._id,
@@ -67,7 +70,7 @@ describe('Mark as Seen - /widgets/messages/mark-as (POST) #novu-v2', async () =>
     expect(updatedMessage.lastReadDate).to.be.not.ok;
   });
 
-  it('should change the read status', async function () {
+  it('should change the read status', async () => {
     await novuClient.subscribers.messages.markAllAs(
       {
         messageId: message._id,
@@ -84,7 +87,7 @@ describe('Mark as Seen - /widgets/messages/mark-as (POST) #novu-v2', async () =>
     expect(updatedMessage.lastReadDate).to.be.ok;
   });
 
-  it('should change the seen status to unseen', async function () {
+  it('should change the seen status to unseen', async () => {
     // simulate user seen
     await novuClient.subscribers.messages.markAllAs(
       {
@@ -115,7 +118,7 @@ describe('Mark as Seen - /widgets/messages/mark-as (POST) #novu-v2', async () =>
     expect(updatedMessage.lastReadDate).to.be.not.ok;
   });
 
-  it('should change the read status to unread', async function () {
+  it('should change the read status to unread', async () => {
     // simulate user read
     await novuClient.subscribers.messages.markAllAs(
       {
@@ -145,7 +148,7 @@ describe('Mark as Seen - /widgets/messages/mark-as (POST) #novu-v2', async () =>
     expect(updateMessage.lastReadDate).to.be.ok;
   });
 
-  it('should throw exception if messages were not provided', async function () {
+  it('should throw exception if messages were not provided', async () => {
     const failureMessage = 'should not reach here, should throw error';
 
     try {
@@ -157,10 +160,14 @@ describe('Mark as Seen - /widgets/messages/mark-as (POST) #novu-v2', async () =>
         expect(e.message).to.be.empty;
       }
 
-      expect(e.response.data.message).to.equal('messageId is required');
-      expect(e.response.data.statusCode).to.equal(400);
+      expect(e.response.data.message).to.equal('Validation Error');
+      expect(e.response.data.statusCode).to.equal(422);
+      expect(e.response.data.errors.general.messages).to.include('messageId should not be null or undefined');
+      expect(e.response.data.errors.general.messages).to.include(
+        'messageId must be a valid MongoDB ObjectId or an array of valid MongoDB ObjectIds'
+      );
     }
-    const { error } = await expectSdkExceptionGeneric(() =>
+    const { error } = await expectSdkValidationExceptionGeneric(() =>
       novuClient.subscribers.messages.markAllAs(
         {
           messageId: [],
@@ -170,8 +177,11 @@ describe('Mark as Seen - /widgets/messages/mark-as (POST) #novu-v2', async () =>
       )
     );
 
-    expect(error?.message).to.equal('messageId is required');
-    expect(error?.statusCode).to.equal(400);
+    expect(error?.message).to.equal('Validation Error');
+    expect(error?.statusCode).to.equal(422);
+    expect(error?.errors.general.messages).to.include(
+      'messageId must be a valid MongoDB ObjectId or an array of valid MongoDB ObjectIds'
+    );
   });
 });
 
@@ -233,5 +243,5 @@ async function getSubscriber(
 }
 
 async function pruneMessages(messageRepository) {
-  await messageRepository.deleteMany({});
+  await messageRepository.delete({});
 }

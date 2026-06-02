@@ -1,16 +1,15 @@
-import sinon from 'sinon';
-import { expect } from 'chai';
-import { NotFoundException } from '@nestjs/common';
-import { ButtonTypeEnum, ChannelCTATypeEnum, MessageActionStatusEnum } from '@novu/shared';
-import { ChannelTypeEnum, MessageRepository } from '@novu/dal';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { AnalyticsService, buildFeedKey, InvalidateCacheService } from '@novu/application-generic';
+import { ChannelTypeEnum, MessageRepository } from '@novu/dal';
+import { ButtonTypeEnum, ChannelCTATypeEnum, MessageActionStatusEnum } from '@novu/shared';
+import { expect } from 'chai';
+import sinon from 'sinon';
 
 import { GetSubscriber } from '../../../subscribers/usecases/get-subscriber';
-import { UpdateNotificationAction } from './update-notification-action.usecase';
-import type { UpdateNotificationActionCommand } from './update-notification-action.command';
-import { ApiException } from '../../../shared/exceptions/api.exception';
-import { mapToDto } from '../../utils/notification-mapper';
 import { AnalyticsEventsEnum } from '../../utils';
+import { mapToDto } from '../../utils/notification-mapper';
+import type { UpdateNotificationActionCommand } from './update-notification-action.command';
+import { UpdateNotificationAction } from './update-notification-action.usecase';
 
 const mockSubscriber: any = { _id: '123', subscriberId: 'test-mockSubscriber' };
 const mockMessage: any = {
@@ -90,7 +89,7 @@ describe('UpdateNotificationAction', () => {
     try {
       await updateNotificationAction.execute(command);
     } catch (error) {
-      expect(error).to.be.instanceOf(ApiException);
+      expect(error).to.be.instanceOf(BadRequestException);
       expect(error.message).to.equal(`Subscriber with id: ${command.subscriberId} is not found.`);
     }
   });
@@ -106,7 +105,7 @@ describe('UpdateNotificationAction', () => {
     };
 
     getSubscriberMock.execute.resolves(mockSubscriber);
-    messageRepositoryMock.findOne.resolves(undefined);
+    messageRepositoryMock.findOneForInbox.resolves(undefined);
 
     try {
       await updateNotificationAction.execute(command);
@@ -127,12 +126,12 @@ describe('UpdateNotificationAction', () => {
     };
 
     getSubscriberMock.execute.resolves(mockSubscriber);
-    messageRepositoryMock.findOne.resolves(mockMessage);
+    messageRepositoryMock.findOneForInbox.resolves(mockMessage);
 
     try {
       await updateNotificationAction.execute(command);
     } catch (error) {
-      expect(error).to.be.instanceOf(ApiException);
+      expect(error).to.be.instanceOf(BadRequestException);
       expect(error.message).to.equal(`Could not perform action on the primary button because it does not exist.`);
     }
   });
@@ -148,12 +147,12 @@ describe('UpdateNotificationAction', () => {
     };
 
     getSubscriberMock.execute.resolves(mockSubscriber);
-    messageRepositoryMock.findOne.resolves(mockMessage);
+    messageRepositoryMock.findOneForInbox.resolves(mockMessage);
 
     try {
       await updateNotificationAction.execute(command);
     } catch (error) {
-      expect(error).to.be.instanceOf(ApiException);
+      expect(error).to.be.instanceOf(BadRequestException);
       expect(error.message).to.equal(`Could not perform action on the secondary button because it does not exist.`);
     }
   });
@@ -180,8 +179,8 @@ describe('UpdateNotificationAction', () => {
     };
 
     getSubscriberMock.execute.resolves(mockSubscriber);
-    messageRepositoryMock.findOne.onFirstCall().resolves(mockMessageWithButtons);
-    messageRepositoryMock.findOne.onSecondCall().resolves(updatedMessageWithButtonsMock);
+    messageRepositoryMock.findOneForInbox.onFirstCall().resolves(mockMessageWithButtons);
+    messageRepositoryMock.findOneForInbox.onSecondCall().resolves(updatedMessageWithButtonsMock);
     messageRepositoryMock.updateActionStatus.resolves();
 
     const updatedMessage = await updateNotificationAction.execute(command);
@@ -201,33 +200,6 @@ describe('UpdateNotificationAction', () => {
     expect(updatedMessage.secondaryAction?.isCompleted).to.be.false;
   });
 
-  it('should invalidate the cache', async () => {
-    const command: UpdateNotificationActionCommand = {
-      environmentId: 'env-1',
-      organizationId: 'org-1',
-      subscriberId: 'not-found',
-      notificationId: mockMessage._id,
-      actionType: ButtonTypeEnum.PRIMARY,
-      actionStatus: MessageActionStatusEnum.DONE,
-    };
-
-    getSubscriberMock.execute.resolves(mockSubscriber);
-    messageRepositoryMock.findOne.resolves(mockMessageWithButtons);
-    messageRepositoryMock.updateActionStatus.resolves();
-
-    await updateNotificationAction.execute(command);
-
-    expect(invalidateCacheMock.invalidateQuery.calledOnce).to.be.true;
-    expect(invalidateCacheMock.invalidateQuery.firstCall.args).to.deep.equal([
-      {
-        key: buildFeedKey().invalidate({
-          subscriberId: mockSubscriber.subscriberId,
-          _environmentId: command.environmentId,
-        }),
-      },
-    ]);
-  });
-
   it('should send the analytics', async () => {
     const command: UpdateNotificationActionCommand = {
       environmentId: 'env-1',
@@ -239,7 +211,8 @@ describe('UpdateNotificationAction', () => {
     };
 
     getSubscriberMock.execute.resolves(mockSubscriber);
-    messageRepositoryMock.findOne.resolves(mockMessageWithButtons);
+    messageRepositoryMock.findOneForInbox.onFirstCall().resolves(mockMessageWithButtons);
+    messageRepositoryMock.findOneForInbox.onSecondCall().resolves(mockMessageWithButtons);
     messageRepositoryMock.updateActionStatus.resolves();
 
     await updateNotificationAction.execute(command);

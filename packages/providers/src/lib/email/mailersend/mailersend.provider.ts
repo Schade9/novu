@@ -1,21 +1,18 @@
 import { EmailProviderIdEnum } from '@novu/shared';
 import {
   ChannelTypeEnum,
-  ISendMessageSuccessResponse,
+  CheckIntegrationResponseEnum,
+  ICheckIntegrationResponse,
   IEmailOptions,
   IEmailProvider,
-  ICheckIntegrationResponse,
-  CheckIntegrationResponseEnum,
+  ISendMessageSuccessResponse,
 } from '@novu/stateless';
 
-import MailerSend, { EmailParams, Recipient, Attachment } from 'mailersend';
+import { Attachment, EmailParams, MailerSend, Recipient, Sender } from 'mailersend';
 import { BaseProvider, CasingEnum } from '../../../base.provider';
 import { WithPassthrough } from '../../../utils/types';
 
-export class MailersendEmailProvider
-  extends BaseProvider
-  implements IEmailProvider
-{
+export class MailersendEmailProvider extends BaseProvider implements IEmailProvider {
   readonly id = EmailProviderIdEnum.MailerSend;
   protected casing: CasingEnum = CasingEnum.SNAKE_CASE;
   readonly channelType = ChannelTypeEnum.EMAIL as ChannelTypeEnum.EMAIL;
@@ -26,10 +23,10 @@ export class MailersendEmailProvider
       apiKey: string;
       from?: string;
       senderName?: string;
-    },
+    }
   ) {
     super();
-    this.mailerSend = new MailerSend({ api_key: this.config.apiKey });
+    this.mailerSend = new MailerSend({ apiKey: this.config.apiKey });
   }
 
   private createRecipients(recipients: IEmailOptions['to']): Recipient[] {
@@ -38,12 +35,15 @@ export class MailersendEmailProvider
       : [new Recipient(recipients)];
   }
 
-  private getAttachments(
-    attachments: IEmailOptions['attachments'],
-  ): Attachment[] | null {
+  private getAttachments(attachments: IEmailOptions['attachments']): Attachment[] | null {
     return attachments?.map(
       (attachment) =>
-        new Attachment(attachment.file.toString('base64'), attachment.name),
+        new Attachment(
+          attachment.file.toString('base64'),
+          attachment.name,
+          attachment.disposition ?? (attachment.cid ? 'inline' : 'attachment'),
+          attachment.cid
+        )
     );
   }
 
@@ -51,10 +51,11 @@ export class MailersendEmailProvider
     const recipients = this.createRecipients(options.to);
     const attachments = this.getAttachments(options.attachments);
 
+    const sentFrom = new Sender(options.from ?? this.config.from, options.senderName || this.config.senderName || '');
+
     const emailParams = new EmailParams()
-      .setFrom(options.from ?? this.config.from)
-      .setFromName(options.senderName || this.config.senderName || '')
-      .setRecipients(recipients)
+      .setFrom(sentFrom)
+      .setTo(recipients)
       .setSubject(options.subject)
       .setHtml(options.html)
       .setText(options.text)
@@ -71,7 +72,16 @@ export class MailersendEmailProvider
     }
 
     if (options.replyTo) {
-      emailParams.setReplyTo(options.replyTo);
+      const replyTo = new Sender(options.replyTo);
+      emailParams.setReplyTo(replyTo);
+    }
+
+    const inReplyTo = Object.entries(options.headers ?? {}).find(
+      ([headerName]) => headerName.toLowerCase() === 'in-reply-to'
+    )?.[1];
+
+    if (inReplyTo) {
+      emailParams.setInReplyTo(inReplyTo);
     }
 
     return emailParams;
@@ -79,28 +89,27 @@ export class MailersendEmailProvider
 
   async sendMessage(
     options: IEmailOptions,
-    bridgeProviderData: WithPassthrough<Record<string, unknown>> = {},
+    bridgeProviderData: WithPassthrough<Record<string, unknown>> = {}
   ): Promise<ISendMessageSuccessResponse> {
-    const emailParams = this.transform(
-      bridgeProviderData,
-      this.createMailData(options),
-    ).body;
-    const response = await this.mailerSend.send(emailParams);
+    const emailParams = this.transform(bridgeProviderData, this.createMailData(options)).body as unknown as EmailParams;
+    const response = await this.mailerSend.email.send(emailParams);
 
+    /**
+     * For some reason the response object has changed in one of the versions of mailersend API.
+     * The fallback treats the actual response object as an array of responses.
+     */
     return {
-      id: response[0]?.['X-Message-Id'],
+      id: response.headers['x-message-id'],
       date: new Date().toISOString(),
     };
   }
 
-  async checkIntegration(
-    options: IEmailOptions,
-  ): Promise<ICheckIntegrationResponse> {
+  async checkIntegration(options: IEmailOptions): Promise<ICheckIntegrationResponse> {
     const emailParams = this.createMailData(options);
-    const emailSendResponse = await this.mailerSend.send(emailParams);
-    const code = this.mapResponse(emailSendResponse.status);
+    const emailSendResponse = await this.mailerSend.email.send(emailParams);
+    const code = this.mapResponse(emailSendResponse.statusCode);
 
-    if (emailSendResponse.ok && code === CheckIntegrationResponseEnum.SUCCESS) {
+    if (code === CheckIntegrationResponseEnum.SUCCESS) {
       return {
         success: true,
         message: 'Integrated successfully!',
@@ -108,10 +117,7 @@ export class MailersendEmailProvider
       };
     }
 
-    const message = await emailSendResponse
-      .json()
-      .then((res) => res?.message || 'Unknown error occurred')
-      .catch(() => 'Unknown error occurred');
+    const message = emailSendResponse.body?.message || 'Unknown error occurred';
 
     return {
       success: false,

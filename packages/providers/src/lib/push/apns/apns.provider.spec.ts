@@ -1,5 +1,5 @@
-import { expect, test, vi } from 'vitest';
 import apn from '@parse/node-apn';
+import { expect, test, vi } from 'vitest';
 import { APNSPushProvider } from './apns.provider';
 
 test('should trigger apns library correctly', async () => {
@@ -44,7 +44,7 @@ test('should trigger apns library correctly', async () => {
     subscriber: {},
   });
 
-  expect(mockSend).toBeCalledWith(
+  expect(mockSend).toHaveBeenCalledWith(
     {
       encoding: 'utf8',
       payload: { data: 'data' },
@@ -59,7 +59,113 @@ test('should trigger apns library correctly', async () => {
       priority: 10,
       topic: 'bundleId',
     },
-    ['target'],
+    ['target']
+  );
+});
+
+test('should set apns-collapse-id from messageId when collapseId is not in overrides', async () => {
+  const mockSend = vi.fn(() => {
+    return {
+      failed: [],
+      sent: [
+        {
+          device: 'device',
+        },
+      ],
+    };
+  });
+
+  vi.spyOn(apn as any, 'Provider').mockImplementation(() => {
+    return {
+      send: mockSend,
+      shutdown: () => {},
+    };
+  });
+
+  const provider = new APNSPushProvider({
+    key: 'key',
+    keyId: 'keyId',
+    teamId: 'teamId',
+    bundleId: 'bundleId',
+    production: true,
+  });
+
+  await provider.sendMessage({
+    target: ['target'],
+    title: 'title',
+    content: 'content',
+    messageId: 'message-id-1',
+    payload: {
+      data: 'data',
+    },
+    step: {
+      digest: false,
+      events: undefined,
+      total_count: undefined,
+    },
+    subscriber: {},
+  });
+
+  expect(mockSend).toHaveBeenCalledWith(
+    expect.objectContaining({
+      collapseId: 'message-id-1',
+      topic: 'bundleId',
+    }),
+    ['target']
+  );
+});
+
+test('should not override collapseId from overrides when messageId is set', async () => {
+  const mockSend = vi.fn(() => {
+    return {
+      failed: [],
+      sent: [
+        {
+          device: 'device',
+        },
+      ],
+    };
+  });
+
+  vi.spyOn(apn as any, 'Provider').mockImplementation(() => {
+    return {
+      send: mockSend,
+      shutdown: () => {},
+    };
+  });
+
+  const provider = new APNSPushProvider({
+    key: 'key',
+    keyId: 'keyId',
+    teamId: 'teamId',
+    bundleId: 'bundleId',
+    production: true,
+  });
+
+  await provider.sendMessage({
+    target: ['target'],
+    title: 'title',
+    content: 'content',
+    messageId: 'message-id-1',
+    payload: {
+      data: 'data',
+    },
+    overrides: {
+      collapseId: 'custom-collapse',
+    },
+    step: {
+      digest: false,
+      events: undefined,
+      total_count: undefined,
+    },
+    subscriber: {},
+  });
+
+  expect(mockSend).toHaveBeenCalledWith(
+    expect.objectContaining({
+      collapseId: 'custom-collapse',
+    }),
+    ['target']
   );
 });
 
@@ -112,10 +218,10 @@ test('should trigger apns library correctly with _passthrough', async () => {
           topic: '_passthrough',
         },
       },
-    },
+    }
   );
 
-  expect(mockSend).toBeCalledWith(
+  expect(mockSend).toHaveBeenCalledWith(
     {
       encoding: 'utf8',
       payload: { data: 'data' },
@@ -131,6 +237,6 @@ test('should trigger apns library correctly with _passthrough', async () => {
       topic: '_passthrough',
       'url-args': ['target'],
     },
-    ['target'],
+    ['target']
   );
 });

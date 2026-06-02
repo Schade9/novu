@@ -1,7 +1,7 @@
-import { ConfirmationModal } from '@/components/confirmation-modal';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/primitives/select';
 import { IIntegration } from '@novu/shared';
 import { useState } from 'react';
+import { ConfirmationModal } from '@/components/confirmation-modal';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/primitives/select';
 
 export type SelectPrimaryIntegrationModalProps = {
   isOpen: boolean;
@@ -66,6 +66,7 @@ export function SelectPrimaryIntegrationModal({
         if (!open) {
           setSelectedIntegrationId('');
         }
+
         onOpenChange(open);
       }}
       onConfirm={() => onConfirm(mode === 'select' ? selectedIntegrationId : undefined)}

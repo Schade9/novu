@@ -1,8 +1,8 @@
-import { expect, test } from 'vitest';
+import { ChannelEndpointByType, ENDPOINT_TYPES, IChatOptions } from '@novu/stateless';
 import { nanoid } from 'nanoid';
-import { IChatOptions } from '@novu/stateless';
-import { WhatsappBusinessChatProvider } from './whatsapp-business.provider';
+import { expect, test } from 'vitest';
 import { axiosSpy } from '../../../utils/test/spy-axios';
+import { WhatsappBusinessChatProvider } from './whatsapp-business.provider';
 
 const mockProviderConfig = {
   accessToken: 'my-access-token',
@@ -27,30 +27,29 @@ test('should trigger whatsapp-business library correctly with simple text messag
   const provider = new WhatsappBusinessChatProvider(mockProviderConfig);
 
   const options: IChatOptions = {
-    phoneNumber: '+111111111',
     content: 'Simple text message',
+    channelData: {
+      identifier: '-',
+      type: ENDPOINT_TYPES.PHONE,
+      endpoint: { phoneNumber: '+111111111' },
+    },
   };
 
   const res = await provider.sendMessage(options);
 
   expect(mockPost).toHaveBeenCalled();
-  expect(mockPost).toHaveBeenCalledWith(
-    baseUrl(mockProviderConfig.phoneNumberIdentification),
-    {
-      messaging_product: 'whatsapp',
-      recipient_type: 'individual',
-      text: {
-        body: options.content,
-        preview_url: false,
-      },
-      to: options.phoneNumber,
-      type: 'text',
+  expect(mockPost).toHaveBeenCalledWith(baseUrl(mockProviderConfig.phoneNumberIdentification), {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    text: {
+      body: options.content,
+      preview_url: false,
     },
-  );
+    to: (options.channelData.endpoint as ChannelEndpointByType[typeof ENDPOINT_TYPES.PHONE]).phoneNumber,
+    type: 'text',
+  });
 
-  expect(axiosMockSpy).toHaveBeenCalledWith(
-    expectedHeaders(mockProviderConfig.accessToken),
-  );
+  expect(axiosMockSpy).toHaveBeenCalledWith(expectedHeaders(mockProviderConfig.accessToken));
 
   expect(res.id).toBe(messageId);
 });
@@ -63,8 +62,12 @@ test('should trigger whatsapp-business library correctly with template message',
   const provider = new WhatsappBusinessChatProvider(mockProviderConfig);
 
   const options: IChatOptions = {
-    phoneNumber: '+111111111',
     content: 'Simple text message',
+    channelData: {
+      identifier: '-',
+      type: ENDPOINT_TYPES.PHONE,
+      endpoint: { phoneNumber: '+111111111' },
+    },
     customData: {
       template: {
         name: 'hello_world',
@@ -78,20 +81,15 @@ test('should trigger whatsapp-business library correctly with template message',
   const res = await provider.sendMessage(options);
 
   expect(mockPost).toHaveBeenCalled();
-  expect(mockPost).toHaveBeenCalledWith(
-    baseUrl(mockProviderConfig.phoneNumberIdentification),
-    {
-      messaging_product: 'whatsapp',
-      recipient_type: 'individual',
-      template: options.customData.template,
-      to: options.phoneNumber,
-      type: 'template',
-    },
-  );
+  expect(mockPost).toHaveBeenCalledWith(baseUrl(mockProviderConfig.phoneNumberIdentification), {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    template: options.customData.template,
+    to: (options.channelData.endpoint as ChannelEndpointByType[typeof ENDPOINT_TYPES.PHONE]).phoneNumber,
+    type: 'template',
+  });
 
-  expect(axiosMockSpy).toHaveBeenCalledWith(
-    expectedHeaders(mockProviderConfig.accessToken),
-  );
+  expect(axiosMockSpy).toHaveBeenCalledWith(expectedHeaders(mockProviderConfig.accessToken));
 
   expect(res.id).toBe(messageId);
 });
@@ -104,7 +102,11 @@ test('should trigger whatsapp-business library correctly with simple text messag
   const provider = new WhatsappBusinessChatProvider(mockProviderConfig);
 
   const options: IChatOptions = {
-    phoneNumber: '+111111111',
+    channelData: {
+      identifier: '-',
+      type: ENDPOINT_TYPES.PHONE,
+      endpoint: { phoneNumber: '+111111111' },
+    },
     content: 'Simple text message',
   };
 
@@ -119,23 +121,18 @@ test('should trigger whatsapp-business library correctly with simple text messag
   });
 
   expect(mockPost).toHaveBeenCalled();
-  expect(mockPost).toHaveBeenCalledWith(
-    baseUrl(mockProviderConfig.phoneNumberIdentification),
-    {
-      messaging_product: 'whatsapp',
-      recipient_type: 'individual',
-      text: {
-        body: `${options.content} _passthrough`,
-        preview_url: false,
-      },
-      to: options.phoneNumber,
-      type: 'text',
+  expect(mockPost).toHaveBeenCalledWith(baseUrl(mockProviderConfig.phoneNumberIdentification), {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    text: {
+      body: `${options.content} _passthrough`,
+      preview_url: false,
     },
-  );
+    to: (options.channelData.endpoint as ChannelEndpointByType[typeof ENDPOINT_TYPES.PHONE]).phoneNumber,
+    type: 'text',
+  });
 
-  expect(axiosMockSpy).toHaveBeenCalledWith(
-    expectedHeaders(mockProviderConfig.accessToken),
-  );
+  expect(axiosMockSpy).toHaveBeenCalledWith(expectedHeaders(mockProviderConfig.accessToken));
 
   expect(res.id).toBe(messageId);
 });
@@ -148,7 +145,11 @@ test('should trigger whatsapp-business library correctly with template message w
   const provider = new WhatsappBusinessChatProvider(mockProviderConfig);
 
   const options: IChatOptions = {
-    phoneNumber: '+111111111',
+    channelData: {
+      identifier: '-',
+      type: ENDPOINT_TYPES.PHONE,
+      endpoint: { phoneNumber: '+111111111' },
+    },
     content: 'Simple text message',
     customData: {
       template: {
@@ -174,31 +175,26 @@ test('should trigger whatsapp-business library correctly with template message w
   });
 
   expect(mockPost).toHaveBeenCalled();
-  expect(mockPost).toHaveBeenCalledWith(
-    baseUrl(mockProviderConfig.phoneNumberIdentification),
-    {
-      messaging_product: 'whatsapp',
-      recipient_type: 'individual',
-      template: {
-        name: 'hello_world_passthrough',
-        language: {
-          code: 'en_US',
-        },
+  expect(mockPost).toHaveBeenCalledWith(baseUrl(mockProviderConfig.phoneNumberIdentification), {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    template: {
+      name: 'hello_world_passthrough',
+      language: {
+        code: 'en_US',
       },
-      to: options.phoneNumber,
-      type: 'template',
     },
-  );
+    to: (options.channelData.endpoint as ChannelEndpointByType[typeof ENDPOINT_TYPES.PHONE]).phoneNumber,
+    type: 'template',
+  });
 
-  expect(axiosMockSpy).toHaveBeenCalledWith(
-    expectedHeaders(mockProviderConfig.accessToken),
-  );
+  expect(axiosMockSpy).toHaveBeenCalledWith(expectedHeaders(mockProviderConfig.accessToken));
 
   expect(res.id).toBe(messageId);
 });
 
 function baseUrl(phoneNumberIdentification: string) {
-  return `https://graph.facebook.com/v18.0/${phoneNumberIdentification}/messages`;
+  return `https://graph.facebook.com/v22.0/${phoneNumberIdentification}/messages`;
 }
 
 function expectedHeaders(accessToken: string) {

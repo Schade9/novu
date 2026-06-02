@@ -1,3 +1,5 @@
+// @ts-nocheck
+
 import { ISmsProvider } from '../provider/provider.interface';
 import { ChannelTypeEnum } from '../template/template.interface';
 import { SmsHandler } from './sms.handler';
@@ -6,8 +8,7 @@ test('send sms should call the provider method correctly', async () => {
   const provider: ISmsProvider = {
     id: 'sms-provider',
     channelType: ChannelTypeEnum.SMS,
-    sendMessage: () =>
-      Promise.resolve({ id: '1', date: new Date().toString() }),
+    sendMessage: () => Promise.resolve({ id: '1', date: new Date().toString() }),
   };
 
   const spy = jest.spyOn(provider, 'sendMessage');
@@ -17,7 +18,7 @@ test('send sms should call the provider method correctly', async () => {
       channel: ChannelTypeEnum.SMS,
       template: `Name: {{firstName}}`,
     },
-    provider,
+    provider
   );
 
   await smsHandler.send({
@@ -33,7 +34,7 @@ test('send sms should call the provider method correctly', async () => {
       content: 'Name: test name',
       to: '+1333322214',
     },
-    {},
+    {}
   );
   spy.mockRestore();
 });
@@ -42,13 +43,10 @@ test('send sms should template method correctly', async () => {
   const provider: ISmsProvider = {
     id: 'sms-provider',
     channelType: ChannelTypeEnum.SMS,
-    sendMessage: () =>
-      Promise.resolve({ id: '1', date: new Date().toString() }),
+    sendMessage: () => Promise.resolve({ id: '1', date: new Date().toString() }),
   };
 
-  const spyTemplateFunction = jest
-    .fn()
-    .mockImplementation(() => Promise.resolve('test'));
+  const spyTemplateFunction = jest.fn().mockImplementation(() => Promise.resolve('test'));
 
   const smsHandler = new SmsHandler(
     {
@@ -56,7 +54,7 @@ test('send sms should template method correctly', async () => {
       channel: ChannelTypeEnum.SMS,
       template: spyTemplateFunction,
     },
-    provider,
+    provider
   );
 
   await smsHandler.send({
@@ -67,7 +65,7 @@ test('send sms should template method correctly', async () => {
   });
 
   expect(spyTemplateFunction).toHaveBeenCalled();
-  expect(spyTemplateFunction).toBeCalledWith({
+  expect(spyTemplateFunction).toHaveBeenCalledWith({
     $email: 'test@email.com',
     $phone: '+1333322214',
     $user_id: '1234',
@@ -79,8 +77,7 @@ test('send should handle attachments correctly', async () => {
   const provider: ISmsProvider = {
     id: 'sms-provider',
     channelType: ChannelTypeEnum.SMS,
-    sendMessage: () =>
-      Promise.resolve({ id: '1', date: new Date().toString() }),
+    sendMessage: () => Promise.resolve({ id: '1', date: new Date().toString() }),
   };
 
   const spy = jest.spyOn(provider, 'sendMessage');
@@ -90,7 +87,7 @@ test('send should handle attachments correctly', async () => {
       channel: ChannelTypeEnum.SMS as ChannelTypeEnum,
       template: `<div><h1>Test Header</div> Name: {{firstName}}</div>`,
     },
-    provider,
+    provider
   );
 
   await smsHandler.send({

@@ -1,21 +1,65 @@
+import { ApiServiceLevelEnum, FeatureNameEnum, getFeatureForTierAsText, StripeBillingIntervalEnum } from '@novu/shared';
 import { useEffect, useState } from 'react';
-import { ActivePlanBanner } from './active-plan-banner';
-import { PlanSwitcher } from './plan-switcher';
-import { PlansRow } from './plans-row';
-import { HighlightsRow } from './highlights-row';
-import { Features } from './features';
-import { cn } from '../../utils/ui';
+import { ActionType } from '@/components/billing/utils/action.button.constants.ts';
+import { useAuth } from '@/context/auth/hooks';
+import { useFetchSubscription } from '@/hooks/use-fetch-subscription';
 import { useTelemetry } from '../../hooks/use-telemetry';
 import { TelemetryEvent } from '../../utils/telemetry';
-import { useFetchSubscription } from '../../hooks/use-fetch-subscription';
+import { sendGTMEvent } from '../../utils/tracking';
+import { cn } from '../../utils/ui';
 import { showErrorToast, showSuccessToast } from '../primitives/sonner-helpers';
+import { ActivePlanBanner } from './active-plan-banner';
+import { Features } from './features';
+import { PlanSwitcher } from './plan-switcher';
+import { type PlanConfig, PlansRow } from './plans-row';
+
+function createPlanConfig(plan: ApiServiceLevelEnum, interval: StripeBillingIntervalEnum): PlanConfig {
+  const price = getFeatureForTierAsText(
+    interval === StripeBillingIntervalEnum.YEAR
+      ? FeatureNameEnum.PLATFORM_ANNUAL_COST
+      : FeatureNameEnum.PLATFORM_MONTHLY_COST,
+    plan
+  );
+
+  const actionTypeMap = {
+    [ApiServiceLevelEnum.FREE]: undefined,
+    [ApiServiceLevelEnum.PRO]: ActionType.BUTTON,
+    [ApiServiceLevelEnum.BUSINESS]: ActionType.BUTTON,
+    [ApiServiceLevelEnum.ENTERPRISE]: ActionType.CONTACT,
+    [ApiServiceLevelEnum.UNLIMITED]: ActionType.CONTACT,
+  };
+
+  return {
+    name: getFeatureForTierAsText(FeatureNameEnum.PLATFORM_PLAN_LABEL, plan),
+    price,
+    subtitle: price === '0$' ? 'Free forever' : `billed ${interval === 'year' ? 'annually' : 'monthly'}`,
+    actionType: actionTypeMap[plan],
+  };
+}
+
+type DisplayedPlan =
+  | ApiServiceLevelEnum.FREE
+  | ApiServiceLevelEnum.PRO
+  | ApiServiceLevelEnum.BUSINESS
+  | ApiServiceLevelEnum.ENTERPRISE;
+
+function getPlansConfig(interval: StripeBillingIntervalEnum): Record<DisplayedPlan, PlanConfig> {
+  return {
+    [ApiServiceLevelEnum.FREE]: createPlanConfig(ApiServiceLevelEnum.FREE, interval),
+    [ApiServiceLevelEnum.PRO]: createPlanConfig(ApiServiceLevelEnum.PRO, interval),
+    [ApiServiceLevelEnum.BUSINESS]: createPlanConfig(ApiServiceLevelEnum.BUSINESS, interval),
+    [ApiServiceLevelEnum.ENTERPRISE]: createPlanConfig(ApiServiceLevelEnum.ENTERPRISE, interval),
+  };
+}
 
 export function Plan() {
   const track = useTelemetry();
+  const { currentOrganization } = useAuth();
   const { subscription: data } = useFetchSubscription();
   const [selectedBillingInterval, setSelectedBillingInterval] = useState<'month' | 'year'>(
     data?.billingInterval || 'month'
   );
+  const plans = getPlansConfig(selectedBillingInterval as StripeBillingIntervalEnum);
 
   useEffect(() => {
     const checkoutResult = new URLSearchParams(window.location.search).get('result');
@@ -26,6 +70,20 @@ export function Plan() {
         billingInterval: selectedBillingInterval,
         plan: data?.apiServiceLevel,
       });
+
+      if (data?.apiServiceLevel && data.apiServiceLevel !== ApiServiceLevelEnum.FREE) {
+        const tierPrice = getFeatureForTierAsText(
+          selectedBillingInterval === 'year'
+            ? FeatureNameEnum.PLATFORM_ANNUAL_COST
+            : FeatureNameEnum.PLATFORM_MONTHLY_COST,
+          data.apiServiceLevel
+        );
+
+        sendGTMEvent('account_upgrade', {
+          value: tierPrice,
+          org_id: currentOrganization?._id,
+        });
+      }
     }
 
     if (checkoutResult === 'canceled') {
@@ -35,8 +93,7 @@ export function Plan() {
         plan: data?.apiServiceLevel,
       });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [data?.apiServiceLevel, currentOrganization?._id, selectedBillingInterval, track]);
 
   useEffect(() => {
     track(TelemetryEvent.BILLING_PAGE_VIEWED, {
@@ -44,10 +101,9 @@ export function Plan() {
       billingInterval: selectedBillingInterval,
       isTrialActive: data?.trial?.isActive,
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [data?.apiServiceLevel, data?.trial?.isActive, selectedBillingInterval, track]);
 
-  const handleBillingIntervalChange = (interval: 'month' | 'year') => {
+  const handleBillingIntervalChange = (interval: StripeBillingIntervalEnum) => {
     track(TelemetryEvent.BILLING_INTERVAL_CHANGED, {
       from: selectedBillingInterval,
       to: interval,
@@ -64,11 +120,11 @@ export function Plan() {
         setSelectedBillingInterval={handleBillingIntervalChange}
       />
       <PlansRow
-        selectedBillingInterval={selectedBillingInterval}
-        currentPlan={data?.apiServiceLevel as 'free' | 'business' | 'enterprise'}
-        trial={data?.trial}
+        selectedBillingInterval={selectedBillingInterval as StripeBillingIntervalEnum}
+        currentPlan={data?.apiServiceLevel as ApiServiceLevelEnum}
+        plans={plans}
+        isOnTrial={data?.trial?.isActive}
       />
-      <HighlightsRow />
       <Features />
     </div>
   );

@@ -1,7 +1,7 @@
-import { novuConfig } from '@/utils/config';
 import { Bell, Inbox, InboxContent } from '@novu/nextjs';
 import { BellIcon } from '@radix-ui/react-icons';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { novuConfig } from '@/utils/config';
 
 export default function CustomPopoverPage() {
   return (
@@ -11,13 +11,13 @@ export default function CustomPopoverPage() {
           <Bell
             renderBell={(unreadCount) => (
               <div>
-                <span>{unreadCount}</span>
+                <span>{String(unreadCount)}</span>
                 <BellIcon />
               </div>
             )}
           />
         </PopoverTrigger>
-        <PopoverContent className="h-[500px] w-[400px] overflow-auto p-0">
+        <PopoverContent className="h-[600px] w-[400px] overflow-hidden p-0">
           <InboxContent />
         </PopoverContent>
       </Popover>

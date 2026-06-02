@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import {
   MessageTemplateRepository,
   NotificationTemplateEntity,
@@ -16,15 +16,13 @@ import {
   ITemplateConfiguration,
   PreferenceOverrideSourceEnum,
   PreferencesTypeEnum,
+  SeverityLevelEnum,
   StepTypeEnum,
 } from '@novu/shared';
-
-import { GetSubscriberTemplatePreferenceCommand } from './get-subscriber-template-preference.command';
-
-import { ApiException } from '../../utils/exceptions';
-import { buildSubscriberKey, CachedEntity } from '../../services/cache';
-import { GetPreferences } from '../get-preferences';
 import { Instrument, InstrumentUsecase } from '../../instrumentation';
+import { buildSubscriberKey, CachedResponse } from '../../services';
+import { GetPreferences } from '../get-preferences';
+import { GetSubscriberTemplatePreferenceCommand } from './get-subscriber-template-preference.command';
 
 const PRIORITY_ORDER = [
   PreferenceOverrideSourceEnum.TEMPLATE,
@@ -39,14 +37,12 @@ export class GetSubscriberTemplatePreference {
     private subscriberRepository: SubscriberRepository,
     private workflowOverrideRepository: WorkflowOverrideRepository,
     private tenantRepository: TenantRepository,
-    private getPreferences: GetPreferences,
+    private getPreferences: GetPreferences
   ) {}
 
   @InstrumentUsecase()
-  async execute(
-    command: GetSubscriberTemplatePreferenceCommand,
-  ): Promise<ISubscriberPreferenceResponse> {
-    const subscriber = await this.getSubscriber(command);
+  async execute(command: GetSubscriberTemplatePreferenceCommand): Promise<ISubscriberPreferenceResponse> {
+    const subscriber: Pick<SubscriberEntity, '_id'> | null = command.subscriber ?? (await this.getSubscriber(command));
 
     const initialChannels = await this.getChannels(command);
 
@@ -54,10 +50,8 @@ export class GetSubscriberTemplatePreference {
 
     const templateChannelPreference = command.template.preferenceSettings;
 
-    const subscriberWorkflowPreference =
-      await this.getSubscriberWorkflowPreference(command, subscriber._id);
-    const workflowOverrideChannelPreference =
-      workflowOverride?.preferenceSettings;
+    const subscriberWorkflowPreference = await this.getSubscriberWorkflowPreference(command, subscriber._id);
+    const workflowOverrideChannelPreference = workflowOverride?.preferenceSettings;
 
     const { channels, overrides } = overridePreferences(
       {
@@ -65,7 +59,7 @@ export class GetSubscriberTemplatePreference {
         subscriber: subscriberWorkflowPreference.channels,
         workflowOverride: workflowOverrideChannelPreference,
       },
-      initialChannels,
+      initialChannels
     );
 
     const template = mapTemplateConfiguration({
@@ -87,7 +81,7 @@ export class GetSubscriberTemplatePreference {
   @Instrument()
   private async getSubscriberWorkflowPreference(
     command: GetSubscriberTemplatePreferenceCommand,
-    subscriberId: string,
+    subscriberId: string
   ): Promise<{
     channels: IPreferenceChannels;
     critical?: boolean;
@@ -99,12 +93,23 @@ export class GetSubscriberTemplatePreference {
       organizationId: command.organizationId,
       subscriberId,
       templateId: command.template._id,
+      contextKeys: command.contextKeys,
     });
 
-    const subscriberWorkflowChannels =
-      GetPreferences.mapWorkflowPreferencesToChannelPreferences(
-        subscriberWorkflowPreference.preferences,
-      );
+    if (!subscriberWorkflowPreference) {
+      const emptyWorkflowChannels = GetPreferences.mapWorkflowPreferencesToChannelPreferences(undefined);
+
+      return {
+        channels: emptyWorkflowChannels,
+        critical: undefined,
+        type: PreferencesTypeEnum.SUBSCRIBER_WORKFLOW,
+        enabled: true,
+      };
+    }
+
+    const subscriberWorkflowChannels = GetPreferences.mapWorkflowPreferencesToChannelPreferences(
+      subscriberWorkflowPreference.preferences
+    );
     const subscriberPreferenceType = subscriberWorkflowPreference.type;
     const critical = subscriberWorkflowPreference.preferences?.all?.readOnly;
     const enabled = true;
@@ -118,9 +123,7 @@ export class GetSubscriberTemplatePreference {
   }
 
   @Instrument()
-  private async getWorkflowOverride(
-    command: GetSubscriberTemplatePreferenceCommand,
-  ) {
+  private async getWorkflowOverride(command: GetSubscriberTemplatePreferenceCommand) {
     if (!command.tenant?.identifier) {
       return null;
     }
@@ -143,9 +146,7 @@ export class GetSubscriberTemplatePreference {
   }
 
   @Instrument()
-  private async getChannels(
-    command: GetSubscriberTemplatePreferenceCommand,
-  ): Promise<IPreferenceChannels> {
+  private async getChannels(command: GetSubscriberTemplatePreferenceCommand): Promise<IPreferenceChannels> {
     let includedChannels: ChannelTypeEnum[];
     if (command.includeInactiveChannels === true) {
       includedChannels = Object.values(ChannelTypeEnum);
@@ -161,38 +162,33 @@ export class GetSubscriberTemplatePreference {
         chat: true,
         push: true,
       },
-      includedChannels,
+      includedChannels
     );
 
     return initialChannels;
   }
 
   @Instrument()
-  private async queryActiveChannels(
-    command: GetSubscriberTemplatePreferenceCommand,
-  ): Promise<ChannelTypeEnum[]> {
-    const activeSteps = command.template.steps.filter(
-      (step) => step.active === true,
-    );
+  private async queryActiveChannels(command: GetSubscriberTemplatePreferenceCommand): Promise<ChannelTypeEnum[]> {
+    const activeSteps = command.template.steps.filter((step) => step.active === true);
 
     const stepMissingTemplate = activeSteps.some((step) => !step.template);
 
     if (stepMissingTemplate) {
       const messageIds = activeSteps.map((step) => step._templateId);
 
-      const messageTemplates = await this.messageTemplateRepository.find({
-        _environmentId: command.environmentId,
-        _id: {
-          $in: messageIds,
+      const messageTemplates = await this.messageTemplateRepository.find(
+        {
+          _environmentId: command.environmentId,
+          _id: {
+            $in: messageIds,
+          },
         },
-      });
+        '_id type'
+      );
 
       return [
-        ...new Set(
-          messageTemplates.map(
-            (messageTemplate) => messageTemplate.type,
-          ) as unknown as ChannelTypeEnum[],
-        ),
+        ...new Set(messageTemplates.map((messageTemplate) => messageTemplate.type) as unknown as ChannelTypeEnum[]),
       ];
     }
 
@@ -210,7 +206,7 @@ export class GetSubscriberTemplatePreference {
     return channels as unknown as ChannelTypeEnum[];
   }
 
-  @CachedEntity({
+  @CachedResponse({
     builder: (command: GetSubscriberTemplatePreferenceCommand) =>
       buildSubscriberKey({
         _environmentId: command.environmentId,
@@ -218,19 +214,21 @@ export class GetSubscriberTemplatePreference {
       }),
   })
   private async getSubscriber(
-    command: GetSubscriberTemplatePreferenceCommand,
-  ): Promise<SubscriberEntity | null> {
+    command: GetSubscriberTemplatePreferenceCommand
+  ): Promise<Pick<SubscriberEntity, '_id'> | null> {
     if (command.subscriber) {
       return command.subscriber;
     }
 
-    const subscriber = await this.subscriberRepository.findBySubscriberId(
+    const subscriber: Pick<SubscriberEntity, '_id'> | null = await this.subscriberRepository.findBySubscriberId(
       command.environmentId,
       command.subscriberId,
+      true,
+      '_id'
     );
 
     if (!subscriber) {
-      throw new ApiException(`Subscriber ${command.subscriberId} not found`);
+      throw new BadRequestException(`Subscriber ${command.subscriberId} not found`);
     }
 
     return subscriber;
@@ -241,7 +239,7 @@ function updateOverrideReasons(
   channelName,
   sourceName: PreferenceOverrideSourceEnum,
   index: number,
-  overrideReasons: IPreferenceOverride[],
+  overrideReasons: IPreferenceOverride[]
 ) {
   const currentOverride: IPreferenceOverride = {
     channel: channelName as ChannelTypeEnum,
@@ -251,7 +249,6 @@ function updateOverrideReasons(
   const notFoundFlag = -1;
   const existsInOverrideReasons = index !== notFoundFlag;
   if (existsInOverrideReasons) {
-    // eslint-disable-next-line no-param-reassign
     overrideReasons[index] = currentOverride;
   } else {
     overrideReasons.push(currentOverride);
@@ -264,7 +261,7 @@ function overridePreference(
     channels: IPreferenceChannels;
   },
   sourcePreference: IPreferenceChannels,
-  sourceName: PreferenceOverrideSourceEnum,
+  sourceName: PreferenceOverrideSourceEnum
 ) {
   const channels = { ...oldPreferenceState.channels };
   const overrides = [...oldPreferenceState.overrides];
@@ -272,9 +269,7 @@ function overridePreference(
   for (const [channelName, channelValue] of Object.entries(sourcePreference)) {
     if (typeof channels[channelName] !== 'boolean') continue;
 
-    const index = overrides.findIndex(
-      (overrideReason) => overrideReason.channel === channelName,
-    );
+    const index = overrides.findIndex((overrideReason) => overrideReason.channel === channelName);
 
     const isSameReason = overrides[index]?.source !== channelValue;
 
@@ -292,7 +287,7 @@ function overridePreference(
 
 export function overridePreferences(
   preferenceSources: IOverridePreferencesSources,
-  initialActiveChannels: IPreferenceChannels,
+  initialActiveChannels: IPreferenceChannels
 ) {
   let result: {
     overrides: IPreferenceOverride[];
@@ -303,9 +298,7 @@ export function overridePreferences(
   };
 
   for (const sourceName of PRIORITY_ORDER) {
-    const sourcePreference = preferenceSources[
-      sourceName
-    ] as IPreferenceChannels;
+    const sourcePreference = preferenceSources[sourceName] as IPreferenceChannels;
 
     // subscriber may miss preference if he did not toggle his preferences
     if (!sourcePreference) continue;
@@ -316,19 +309,13 @@ export function overridePreferences(
   return result;
 }
 
-export const filteredPreference = (
-  preferences: IPreferenceChannels,
-  filterKeys: string[],
-): IPreferenceChannels =>
+export const filteredPreference = (preferences: IPreferenceChannels, filterKeys: string[]): IPreferenceChannels =>
   Object.entries(preferences).reduce(
-    (obj, [key, value]) =>
-      filterKeys.includes(key) ? { ...obj, [key]: value } : obj,
-    {},
+    (obj, [key, value]) => (filterKeys.includes(key) ? { ...obj, [key]: value } : obj),
+    {}
   );
 
-export function mapTemplateConfiguration(
-  template: NotificationTemplateEntity,
-): ITemplateConfiguration {
+export function mapTemplateConfiguration(template: NotificationTemplateEntity): ITemplateConfiguration {
   return {
     _id: template._id,
     name: template.name,
@@ -336,5 +323,8 @@ export function mapTemplateConfiguration(
     critical: template.critical != null ? template.critical : true,
     triggers: template.triggers,
     ...(template.data ? { data: template.data } : {}),
+    updatedAt: template.updatedAt,
+    createdAt: template.createdAt,
+    severity: template.severity ?? SeverityLevelEnum.NONE,
   };
 }

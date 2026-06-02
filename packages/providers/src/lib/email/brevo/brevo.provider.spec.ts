@@ -1,11 +1,12 @@
-import { describe, expect, test, vi } from 'vitest';
 import { EmailEventStatusEnum } from '@novu/stateless';
-import { BrevoEmailProvider } from './brevo.provider';
+import { describe, expect, test, vi } from 'vitest';
 import { axiosSpy } from '../../../utils/test/spy-axios';
+import { BrevoEmailProvider } from './brevo.provider';
+
+const FAKE_BREVO_API_KEY = 'xkeysib-fake-test-key-do-not-use-in-production-00000000000000000000000000000000';
 
 const mockConfig = {
-  apiKey:
-    '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',
+  apiKey: FAKE_BREVO_API_KEY,
   from: 'test@novu.co',
   senderName: 'test',
 };
@@ -15,9 +16,7 @@ const mockNovuMessage = {
   to: ['test@test.com'],
   html: '<div> Mail Content </div>',
   subject: 'Test subject',
-  attachments: [
-    { mime: 'text/plain', file: Buffer.from('dGVzdA=='), name: 'test.txt' },
-  ],
+  attachments: [{ mime: 'text/plain', file: Buffer.from('dGVzdA=='), name: 'test.txt' }],
 };
 
 const mockSendinblueMessage = {
@@ -45,14 +44,13 @@ test('should send message', async () => {
 
   await provider.sendMessage(mockNovuMessage);
 
-  expect(mockRequest).toBeCalled();
-  expect(mockRequest).toBeCalledWith({
+  expect(mockRequest).toHaveBeenCalled();
+  expect(mockRequest).toHaveBeenCalledWith({
     data: '{"sender":{"email":"test@test.com","name":"test"},"to":[{"email":"test@test.com"}],"subject":"Test subject","htmlContent":"<div> Mail Content </div>","attachment":[{"name":"test.txt","content":"ZEdWemRBPT0="}]}',
     headers: {
       Accept: 'application/json',
       'Content-Type': 'application/json',
-      'api-key':
-        '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',
+      'api-key': FAKE_BREVO_API_KEY,
     },
     method: 'POST',
     url: '/smtp/email',
@@ -75,14 +73,13 @@ test('should send message with _passthrough', async () => {
     },
   });
 
-  expect(mockRequest).toBeCalled();
-  expect(mockRequest).toBeCalledWith({
+  expect(mockRequest).toHaveBeenCalled();
+  expect(mockRequest).toHaveBeenCalledWith({
     data: '{"sender":{"email":"test@test.com","name":"test"},"to":[{"email":"test@test.com"}],"subject":"Test subject _passthrough","htmlContent":"<div> Mail Content </div>","attachment":[{"name":"test.txt","content":"ZEdWemRBPT0="}]}',
     headers: {
       Accept: 'application/json',
       'Content-Type': 'application/json',
-      'api-key':
-        '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',
+      'api-key': FAKE_BREVO_API_KEY,
     },
     method: 'POST',
     url: '/smtp/email',
@@ -158,10 +155,7 @@ describe('parseEventBody', () => {
 
   test('should return undefined when status is unrecognized', async () => {
     const provider = new BrevoEmailProvider(mockConfig);
-    const messageId = provider.parseEventBody(
-      { event: 'not-real-event' },
-      'test',
-    );
+    const messageId = provider.parseEventBody({ event: 'not-real-event' }, 'test');
     expect(messageId).toBeUndefined();
   });
 });

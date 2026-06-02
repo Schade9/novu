@@ -1,11 +1,11 @@
 import { EmailProviderIdEnum } from '@novu/shared';
 import {
   ChannelTypeEnum,
-  ISendMessageSuccessResponse,
+  CheckIntegrationResponseEnum,
+  ICheckIntegrationResponse,
   IEmailOptions,
   IEmailProvider,
-  ICheckIntegrationResponse,
-  CheckIntegrationResponseEnum,
+  ISendMessageSuccessResponse,
 } from '@novu/stateless';
 import axios, { AxiosError } from 'axios';
 import { randomUUID } from 'crypto';
@@ -21,10 +21,7 @@ interface ISparkPostResponse {
   };
 }
 
-export class SparkPostEmailProvider
-  extends BaseProvider
-  implements IEmailProvider
-{
+export class SparkPostEmailProvider extends BaseProvider implements IEmailProvider {
   protected casing: CasingEnum = CasingEnum.SNAKE_CASE;
   readonly id = EmailProviderIdEnum.SparkPost;
   readonly channelType = ChannelTypeEnum.EMAIL;
@@ -36,15 +33,15 @@ export class SparkPostEmailProvider
       region: string;
       from: string;
       senderName: string;
-    },
+    }
   ) {
     super();
     this.endpoint = this.getEndpoint(config.region);
   }
 
   async sendMessage(
-    { from, to, subject, text, html, attachments }: IEmailOptions,
-    bridgeProviderData: WithPassthrough<Record<string, unknown>> = {},
+    { from, to, subject, text, html, attachments, headers }: IEmailOptions,
+    bridgeProviderData: WithPassthrough<Record<string, unknown>> = {}
   ): Promise<ISendMessageSuccessResponse> {
     const recipients: { address: string }[] = to.map((recipient) => {
       return { address: recipient };
@@ -68,20 +65,19 @@ export class SparkPostEmailProvider
         text,
         html,
         attachments: files,
+        ...(headers && Object.keys(headers).length > 0 && { headers }),
       },
     });
 
     try {
-      const sent = await axios
-        .create()
-        .post<ISparkPostResponse>('/transmissions', data.body, {
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: this.config.apiKey,
-            ...data.headers,
-          },
-          baseURL: this.endpoint,
-        });
+      const sent = await axios.create().post<ISparkPostResponse>('/transmissions', data.body, {
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: this.config.apiKey,
+          ...data.headers,
+        },
+        baseURL: this.endpoint,
+      });
 
       return {
         id: sent.data.results.id,
@@ -93,9 +89,7 @@ export class SparkPostEmailProvider
     }
   }
 
-  async checkIntegration(
-    options: IEmailOptions,
-  ): Promise<ICheckIntegrationResponse> {
+  async checkIntegration(options: IEmailOptions): Promise<ICheckIntegrationResponse> {
     try {
       await this.sendMessage({
         to: ['no-reply@novu.co'],

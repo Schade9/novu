@@ -1,12 +1,14 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { AnalyticsService, buildFeedKey, CachedQuery } from '@novu/application-generic';
 import { ChannelTypeEnum, MessageRepository } from '@novu/dal';
+import { normalizeTagGroups } from '@novu/shared';
 
-import { ApiException } from '../../../shared/exceptions/api.exception';
 import { GetSubscriber } from '../../../subscribers/usecases/get-subscriber';
 import type { GetNotificationsResponseDto } from '../../dtos/get-notifications-response.dto';
 import { AnalyticsEventsEnum } from '../../utils';
 import { mapToDto } from '../../utils/notification-mapper';
+import { NotificationFilter } from '../../utils/types';
+import { validateDataStructure } from '../../utils/validate-data';
 import type { GetNotificationsCommand } from './get-notifications.command';
 
 @Injectable()
@@ -17,14 +19,6 @@ export class GetNotifications {
     private messageRepository: MessageRepository
   ) {}
 
-  @CachedQuery({
-    builder: ({ environmentId, subscriberId, ...command }: GetNotificationsCommand) =>
-      buildFeedKey().cache({
-        environmentId,
-        subscriberId,
-        ...command,
-      }),
-  })
   async execute(command: GetNotificationsCommand): Promise<GetNotificationsResponseDto> {
     const subscriber = await this.getSubscriber.execute({
       environmentId: command.environmentId,
@@ -33,21 +27,48 @@ export class GetNotifications {
     });
 
     if (!subscriber) {
-      throw new ApiException(`Subscriber with id: ${command.subscriberId} is not found.`);
+      throw new BadRequestException(`Subscriber with id: ${command.subscriberId} is not found.`);
     }
 
     if (command.read === false && command.archived === true) {
-      throw new ApiException('Filtering for unread and archived notifications is not supported.');
+      throw new BadRequestException('Filtering for unread and archived notifications is not supported.');
     }
+
+    let parsedData;
+    if (command.data) {
+      try {
+        parsedData = JSON.parse(command.data);
+        validateDataStructure(parsedData);
+      } catch (error) {
+        if (error instanceof BadRequestException) {
+          throw error;
+        }
+        throw new BadRequestException('Invalid JSON format for data parameter');
+      }
+    }
+
+    const severity = command.severity
+      ? Array.isArray(command.severity)
+        ? command.severity
+        : [command.severity]
+      : undefined;
+    const tagGroups = command.tags !== undefined ? normalizeTagGroups(command.tags) : undefined;
 
     const { data: feed, hasMore } = await this.messageRepository.paginate(
       {
         environmentId: command.environmentId,
         subscriberId: subscriber._id,
         channel: ChannelTypeEnum.IN_APP,
-        tags: command.tags,
+        contextKeys: command.contextKeys,
+        tagGroups,
         read: command.read,
         archived: command.archived,
+        snoozed: command.snoozed,
+        seen: command.seen,
+        data: parsedData,
+        severity,
+        createdGte: command.createdGte ? new Date(command.createdGte) : undefined,
+        createdLte: command.createdLte ? new Date(command.createdLte) : undefined,
       },
       {
         limit: command.limit,
@@ -64,14 +85,22 @@ export class GetNotifications {
       });
     }
 
+    const filters: NotificationFilter = {
+      tags: command.tags,
+      read: command.read,
+      archived: command.archived,
+      snoozed: command.snoozed,
+      seen: command.seen,
+      data: parsedData,
+      severity: command.severity,
+      createdGte: command.createdGte,
+      createdLte: command.createdLte,
+    };
+
     return {
       data: mapToDto(feed),
       hasMore,
-      filter: {
-        tags: command.tags,
-        read: command.read,
-        archived: command.archived,
-      },
+      filter: filters,
     };
   }
 }

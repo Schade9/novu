@@ -1,8 +1,8 @@
-import { Step, StepProps } from '@/components/primitives/step';
-import { IconType } from 'react-icons/lib';
-import { STEP_TYPE_TO_ICON } from './icons/utils';
-import { StepTypeEnum } from '@/utils/enums';
 import { ComponentProps } from 'react';
+import { IconType } from 'react-icons/lib';
+import { Step, StepProps } from '@/components/primitives/step';
+import { StepTypeEnum } from '@/utils/enums';
+import { STEP_TYPE_TO_ICON } from './icons/utils';
 
 type WorkflowStepProps = StepProps & {
   step: StepTypeEnum;
@@ -14,18 +14,26 @@ const stepRenderData: Record<StepTypeEnum, { variant: ComponentProps<typeof Step
   [StepTypeEnum.DELAY]: { variant: 'warning', icon: STEP_TYPE_TO_ICON[StepTypeEnum.DELAY] },
   [StepTypeEnum.DIGEST]: { variant: 'highlighted', icon: STEP_TYPE_TO_ICON[StepTypeEnum.DIGEST] },
   [StepTypeEnum.EMAIL]: { variant: 'information', icon: STEP_TYPE_TO_ICON[StepTypeEnum.EMAIL] },
+  [StepTypeEnum.HTTP_REQUEST]: { variant: 'information', icon: STEP_TYPE_TO_ICON[StepTypeEnum.HTTP_REQUEST] },
   [StepTypeEnum.IN_APP]: { variant: 'stable', icon: STEP_TYPE_TO_ICON[StepTypeEnum.IN_APP] },
   [StepTypeEnum.PUSH]: { variant: 'verified', icon: STEP_TYPE_TO_ICON[StepTypeEnum.PUSH] },
   [StepTypeEnum.SMS]: { variant: 'destructive', icon: STEP_TYPE_TO_ICON[StepTypeEnum.SMS] },
+  [StepTypeEnum.THROTTLE]: { variant: 'destructive', icon: STEP_TYPE_TO_ICON[StepTypeEnum.THROTTLE] },
   [StepTypeEnum.TRIGGER]: { variant: 'neutral', icon: STEP_TYPE_TO_ICON[StepTypeEnum.TRIGGER] },
 };
 
 export const WorkflowStep = (props: WorkflowStepProps) => {
   const { step, ...rest } = props;
-  const Icon = stepRenderData[step].icon;
+  const renderData = stepRenderData[step];
+
+  if (!renderData) {
+    return null;
+  }
+
+  const Icon = renderData.icon;
 
   return (
-    <Step variant={stepRenderData[step].variant} {...rest}>
+    <Step variant={renderData.variant} {...rest}>
       <Icon />
     </Step>
   );

@@ -1,9 +1,4 @@
-import {
-  ChannelTypeEnum,
-  ISendMessageSuccessResponse,
-  ISmsOptions,
-  ISmsProvider,
-} from '@novu/stateless';
+import { ChannelTypeEnum, ISendMessageSuccessResponse, ISmsOptions, ISmsProvider } from '@novu/stateless';
 import { ProxyAgent } from 'proxy-agent';
 import 'cross-fetch';
 import { SmsProviderIdEnum } from '@novu/shared';
@@ -11,7 +6,6 @@ import { BaseProvider, CasingEnum } from '../../../base.provider';
 import { WithPassthrough } from '../../../utils/types';
 
 declare global {
-  // eslint-disable-next-line @typescript-eslint/naming-convention
   interface RequestInit {
     agent: ProxyAgent;
   }
@@ -27,14 +21,14 @@ export class BrevoSmsProvider extends BaseProvider implements ISmsProvider {
     private config: {
       apiKey: string;
       from: string;
-    },
+    }
   ) {
     super();
   }
 
   async sendMessage(
     options: ISmsOptions,
-    bridgeProviderData: WithPassthrough<Record<string, unknown>> = {},
+    bridgeProviderData: WithPassthrough<Record<string, unknown>> = {}
   ): Promise<ISendMessageSuccessResponse> {
     const sms = this.transform(bridgeProviderData, {
       sender: options.from || this.config.from,
@@ -55,6 +49,10 @@ export class BrevoSmsProvider extends BaseProvider implements ISmsProvider {
     });
 
     const body: { messageId: string } = await response.json();
+
+    if (!body.messageId) {
+      throw new Error(`Failed: ${JSON.stringify(body)}`);
+    }
 
     return {
       id: body.messageId,

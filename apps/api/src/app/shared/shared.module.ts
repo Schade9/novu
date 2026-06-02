@@ -1,10 +1,47 @@
-/* eslint-disable global-require */
 import { Module } from '@nestjs/common';
+import { JwtModule } from '@nestjs/jwt';
 import {
+  analyticsService,
+  CacheServiceHealthIndicator,
+  CloudflareSchedulerService,
+  ComputeJobWaitDurationService,
+  CreateExecutionDetails,
+  cacheService,
+  clickHouseService,
+  createNestLoggingModuleOptions,
+  DalServiceHealthIndicator,
+  DeliveryTrendCountsRepository,
+  ExecuteBridgeRequest,
+  ExecuteFrameworkRequest,
+  ExecuteStepResolverRequest,
+  featureFlagsService,
+  GetDecryptedSecretKey,
+  HttpClientService,
+  InMemoryLRUCacheService,
+  InvalidateCacheService,
+  LoggerModule,
+  QueuesModule,
+  RequestLogRepository,
+  StepRunRepository,
+  storageService,
+  TraceLogRepository,
+  TraceRollupRepository,
+  WorkflowRunCountRepository,
+  WorkflowRunRepository,
+} from '@novu/application-generic';
+import {
+  AgentIntegrationRepository,
+  AgentRepository,
   ChangeRepository,
+  CommunityMemberRepository,
+  CommunityOrganizationRepository,
+  CommunityUserRepository,
   ControlValuesRepository,
   DalService,
+  DomainRepository,
+  DomainRouteRepository,
   EnvironmentRepository,
+  EnvironmentVariableRepository,
   ExecutionDetailsRepository,
   FeedRepository,
   IntegrationRepository,
@@ -25,29 +62,7 @@ import {
   UserRepository,
   WorkflowOverrideRepository,
 } from '@novu/dal';
-import {
-  analyticsService,
-  cacheService,
-  CacheServiceHealthIndicator,
-  ComputeJobWaitDurationService,
-  CreateExecutionDetails,
-  createNestLoggingModuleOptions,
-  DalServiceHealthIndicator,
-  distributedLockService,
-  ExecuteBridgeRequest,
-  ExecutionLogRoute,
-  featureFlagsService,
-  GetDecryptedSecretKey,
-  getFeatureFlag,
-  injectCommunityAuthProviders,
-  InvalidateCacheService,
-  LoggerModule,
-  QueuesModule,
-  storageService,
-} from '@novu/application-generic';
-
 import { isClerkEnabled, JobTopicNameEnum } from '@novu/shared';
-import { JwtModule } from '@nestjs/jwt';
 import packageJson from '../../../package.json';
 
 function getDynamicAuthProviders() {
@@ -56,13 +71,29 @@ function getDynamicAuthProviders() {
 
     return eeAuthPackage.injectEEAuthProviders();
   } else {
-    return injectCommunityAuthProviders();
+    const userRepositoryProvider = {
+      provide: 'USER_REPOSITORY',
+      useClass: CommunityUserRepository,
+    };
+
+    const memberRepositoryProvider = {
+      provide: 'MEMBER_REPOSITORY',
+      useClass: CommunityMemberRepository,
+    };
+
+    const organizationRepositoryProvider = {
+      provide: 'ORGANIZATION_REPOSITORY',
+      useClass: CommunityOrganizationRepository,
+    };
+
+    return [userRepositoryProvider, memberRepositoryProvider, organizationRepositoryProvider];
   }
 }
 
 const DAL_MODELS = [
   UserRepository,
   OrganizationRepository,
+  CommunityOrganizationRepository,
   EnvironmentRepository,
   ExecutionDetailsRepository,
   NotificationTemplateRepository,
@@ -83,48 +114,71 @@ const DAL_MODELS = [
   WorkflowOverrideRepository,
   ControlValuesRepository,
   PreferencesRepository,
+  EnvironmentVariableRepository,
+  AgentRepository,
+  AgentIntegrationRepository,
+  DomainRepository,
+  DomainRouteRepository,
 ];
 
 const dalService = {
   provide: DalService,
   useFactory: async () => {
     const service = new DalService();
-    await service.connect(process.env.MONGO_URL);
+    await service.connect(process.env.MONGO_URL || '.');
 
     return service;
   },
 };
 
+const ANALYTICS_PROVIDERS = [
+  // Repositories
+  RequestLogRepository,
+  TraceLogRepository,
+  StepRunRepository,
+  WorkflowRunRepository,
+  WorkflowRunCountRepository,
+  TraceRollupRepository,
+  DeliveryTrendCountsRepository,
+
+  // Services
+  clickHouseService,
+];
+
 const PROVIDERS = [
   analyticsService,
   cacheService,
   CacheServiceHealthIndicator,
+  CloudflareSchedulerService,
   ComputeJobWaitDurationService,
   dalService,
   DalServiceHealthIndicator,
-  distributedLockService,
   featureFlagsService,
+  InMemoryLRUCacheService,
   InvalidateCacheService,
   storageService,
   ...DAL_MODELS,
-  ExecutionLogRoute,
   CreateExecutionDetails,
   ExecuteBridgeRequest,
-  getFeatureFlag,
+  ExecuteFrameworkRequest,
+  ExecuteStepResolverRequest,
   GetDecryptedSecretKey,
+  HttpClientService,
+  ...ANALYTICS_PROVIDERS,
 ];
 
 const IMPORTS = [
   QueuesModule.forRoot([
-    JobTopicNameEnum.EXECUTION_LOG,
     JobTopicNameEnum.WEB_SOCKETS,
     JobTopicNameEnum.WORKFLOW,
     JobTopicNameEnum.INBOUND_PARSE_MAIL,
+    JobTopicNameEnum.STANDARD,
   ]),
   LoggerModule.forRoot(
     createNestLoggingModuleOptions({
       serviceName: packageJson.name,
       version: packageJson.version,
+      silent: !!process.env.CI,
     })
   ),
 ];

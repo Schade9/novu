@@ -1,11 +1,11 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { SubscriberRepository, TopicSubscribersRepository, PreferencesRepository } from '@novu/dal';
 import {
-  buildSubscriberKey,
   buildFeedKey,
   buildMessageCountKey,
+  buildSubscriberKey,
   InvalidateCacheService,
 } from '@novu/application-generic';
+import { PreferencesRepository, SubscriberRepository, TopicSubscribersRepository } from '@novu/dal';
 
 import { RemoveSubscriberCommand } from './remove-subscriber.command';
 
@@ -22,12 +22,6 @@ export class RemoveSubscriber {
     await Promise.all([
       this.invalidateCache.invalidateByKey({
         key: buildSubscriberKey({
-          subscriberId,
-          _environmentId,
-        }),
-      }),
-      this.invalidateCache.invalidateQuery({
-        key: buildFeedKey().invalidate({
           subscriberId,
           _environmentId,
         }),

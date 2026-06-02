@@ -1,8 +1,8 @@
+import { NOVU_ENCRYPTION_SUB_MASK } from '@novu/shared';
 import { UserSession } from '@novu/testing';
 import { expect } from 'chai';
-import { NOVU_ENCRYPTION_SUB_MASK } from '@novu/shared';
 
-describe('Environment - Regenerate Api Key #novu-v1-os', async () => {
+describe('Environment - Regenerate Api Key #novu-v0-os', async () => {
   let session: UserSession;
 
   before(async () => {

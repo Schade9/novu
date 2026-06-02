@@ -1,35 +1,32 @@
 import { BadRequestException, ConflictException, Inject, Injectable } from '@nestjs/common';
-import shortid from 'shortid';
+import {
+  AnalyticsService,
+  areNovuEmailCredentialsSet,
+  areNovuSlackCredentialsSet,
+  areNovuSmsCredentialsSet,
+  encryptCredentials,
+} from '@novu/application-generic';
 import { DalException, IntegrationEntity, IntegrationQuery, IntegrationRepository } from '@novu/dal';
 import {
   CHANNELS_WITH_PRIMARY,
   ChannelTypeEnum,
+  ChatProviderIdEnum,
   EmailProviderIdEnum,
   InAppProviderIdEnum,
   providers,
-  slugify,
   SmsProviderIdEnum,
+  slugify,
 } from '@novu/shared';
-import {
-  AnalyticsService,
-  areNovuEmailCredentialsSet,
-  areNovuSmsCredentialsSet,
-  buildIntegrationKey,
-  encryptCredentials,
-  InvalidateCacheService,
-} from '@novu/application-generic';
-
-import { CreateIntegrationCommand } from './create-integration.command';
-import { ApiException } from '../../../shared/exceptions/api.exception';
+import shortid from 'shortid';
 import { CheckIntegrationCommand } from '../check-integration/check-integration.command';
 import { CheckIntegration } from '../check-integration/check-integration.usecase';
+import { CreateIntegrationCommand } from './create-integration.command';
 
 @Injectable()
 export class CreateIntegration {
   @Inject()
   private checkIntegration: CheckIntegration;
   constructor(
-    private invalidateCache: InvalidateCacheService,
     private integrationRepository: IntegrationRepository,
     private analyticsService: AnalyticsService
   ) {}
@@ -85,7 +82,8 @@ export class CreateIntegration {
 
     if (
       (command.providerId === SmsProviderIdEnum.Novu && !areNovuSmsCredentialsSet()) ||
-      (command.providerId === EmailProviderIdEnum.Novu && !areNovuEmailCredentialsSet())
+      (command.providerId === EmailProviderIdEnum.Novu && !areNovuEmailCredentialsSet()) ||
+      (command.providerId === ChatProviderIdEnum.Novu && !areNovuSlackCredentialsSet())
     ) {
       throw new BadRequestException(`Creating Novu integration for ${command.providerId} provider is not allowed`);
     }
@@ -139,12 +137,6 @@ export class CreateIntegration {
         );
       }
 
-      await this.invalidateCache.invalidateQuery({
-        key: buildIntegrationKey().invalidate({
-          _organizationId: command.organizationId,
-        }),
-      });
-
       const providerIdCapitalized = `${command.providerId.charAt(0).toUpperCase()}${command.providerId.slice(1)}`;
       const defaultName =
         providers.find((provider) => provider.id === command.providerId)?.displayName ?? providerIdCapitalized;
@@ -161,6 +153,7 @@ export class CreateIntegration {
         credentials: encryptCredentials(command.credentials ?? {}),
         active: command.active,
         conditions: command.conditions,
+        configurations: command.configurations,
       };
 
       const isActiveAndChannelSupportsPrimary = command.active && CHANNELS_WITH_PRIMARY.includes(command.channel);
@@ -177,7 +170,7 @@ export class CreateIntegration {
       return integrationEntity;
     } catch (e) {
       if (e instanceof DalException) {
-        throw new ApiException(e.message);
+        throw new BadRequestException(e.message);
       }
       throw e;
     }

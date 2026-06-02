@@ -14,21 +14,23 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-
-import { ApiRateLimitCategoryEnum, FeatureFlagsKeysEnum, UserSessionData } from '@novu/shared';
+import { ApiExcludeController } from '@nestjs/swagger/dist/decorators/api-exclude-controller.decorator';
 import {
   CreateTenant,
   CreateTenantCommand,
-  GetFeatureFlag,
-  GetFeatureFlagCommand,
+  FeatureFlagsService,
   GetTenant,
   GetTenantCommand,
   UpdateTenant,
   UpdateTenantCommand,
 } from '@novu/application-generic';
-import { ApiExcludeController } from '@nestjs/swagger/dist/decorators/api-exclude-controller.decorator';
-import { UserSession } from '../shared/framework/user.decorator';
+import { EnvironmentEntity, OrganizationEntity, UserEntity } from '@novu/dal';
+import { ApiRateLimitCategoryEnum, FeatureFlagsKeysEnum, UserSessionData } from '@novu/shared';
+import { RequireAuthentication } from '../auth/framework/auth.decorator';
 import { ExternalApiAccessible } from '../auth/framework/external-api.decorator';
+import { ThrottlerCategory } from '../rate-limiting/guards';
+import { PaginatedResponseDto } from '../shared/dtos/pagination-response';
+import { ApiOkPaginatedResponse } from '../shared/framework/paginated-ok-response.decorator';
 import {
   ApiCommonResponses,
   ApiConflictResponse,
@@ -36,12 +38,8 @@ import {
   ApiNotFoundResponse,
   ApiResponse,
 } from '../shared/framework/response.decorator';
-import { DeleteTenantCommand } from './usecases/delete-tenant/delete-tenant.command';
-import { DeleteTenant } from './usecases/delete-tenant/delete-tenant.usecase';
-import { ApiOkPaginatedResponse } from '../shared/framework/paginated-ok-response.decorator';
-import { PaginatedResponseDto } from '../shared/dtos/pagination-response';
-import { GetTenants } from './usecases/get-tenants/get-tenants.usecase';
-import { GetTenantsCommand } from './usecases/get-tenants/get-tenants.command';
+import { SdkUsePagination } from '../shared/framework/swagger/sdk.decorators';
+import { UserSession } from '../shared/framework/user.decorator';
 import {
   CreateTenantRequestDto,
   CreateTenantResponseDto,
@@ -50,10 +48,10 @@ import {
   UpdateTenantRequestDto,
   UpdateTenantResponseDto,
 } from './dtos';
-import { ThrottlerCategory } from '../rate-limiting/guards';
-import { UserAuthentication } from '../shared/framework/swagger/api.key.security';
-
-import { SdkUsePagination } from '../shared/framework/swagger/sdk.decorators';
+import { DeleteTenantCommand } from './usecases/delete-tenant/delete-tenant.command';
+import { DeleteTenant } from './usecases/delete-tenant/delete-tenant.usecase';
+import { GetTenantsCommand } from './usecases/get-tenants/get-tenants.command';
+import { GetTenants } from './usecases/get-tenants/get-tenants.usecase';
 
 const v2TenantsApiDescription = ' Tenants is not supported in code first version of the API.';
 
@@ -62,7 +60,7 @@ const v2TenantsApiDescription = ' Tenants is not supported in code first version
 @Controller('/tenants')
 @ApiTags('Tenants')
 @UseInterceptors(ClassSerializerInterceptor)
-@UserAuthentication()
+@RequireAuthentication()
 @ApiExcludeController()
 export class TenantController {
   constructor(
@@ -71,12 +69,11 @@ export class TenantController {
     private getTenantUsecase: GetTenant,
     private deleteTenantUsecase: DeleteTenant,
     private getTenantsUsecase: GetTenants,
-    private getFeatureFlag: GetFeatureFlag
+    private featureFlagService: FeatureFlagsService
   ) {}
 
   @Get('')
   @ExternalApiAccessible()
-  @UserAuthentication()
   @ApiOkPaginatedResponse(GetTenantResponseDto)
   @ApiOperation({
     summary: 'Get tenants',
@@ -186,7 +183,6 @@ export class TenantController {
 
   @Delete('/:identifier')
   @ExternalApiAccessible()
-  @UserAuthentication()
   @ApiOperation({
     summary: 'Delete tenant',
     description: `Deletes a tenant entity from the Novu platform.${v2TenantsApiDescription}`,
@@ -212,14 +208,13 @@ export class TenantController {
   }
 
   private async verifyTenantsApiAvailability(user: UserSessionData) {
-    const isV2Enabled = await this.getFeatureFlag.execute(
-      GetFeatureFlagCommand.create({
-        userId: user._id,
-        environmentId: user.environmentId,
-        organizationId: user.organizationId,
-        key: FeatureFlagsKeysEnum.IS_V2_ENABLED,
-      })
-    );
+    const isV2Enabled = await this.featureFlagService.getFlag({
+      user: { _id: user._id } as UserEntity,
+      environment: { _id: user.environmentId } as EnvironmentEntity,
+      organization: { _id: user.organizationId } as OrganizationEntity,
+      key: FeatureFlagsKeysEnum.IS_V2_ENABLED,
+      defaultValue: false,
+    });
 
     if (!isV2Enabled) {
       return;

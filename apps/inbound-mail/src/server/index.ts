@@ -1,21 +1,23 @@
-/* eslint-disable no-param-reassign */
-import { MailParser } from 'mailparser';
-import _ from 'lodash';
-import Promise from 'bluebird';
-import { convert } from 'html-to-text';
-import events from 'events';
 import fs from 'node:fs';
+import { BullMqService } from '@novu/application-generic';
+import { ObservabilityBackgroundTransactionEnum } from '@novu/shared';
+import Promise from 'bluebird';
+import dns from 'dns';
+import events from 'events';
+import extend from 'extend';
+import { convert } from 'html-to-text';
+import _ from 'lodash';
+import { MailParser } from 'mailparser';
 import path from 'path';
 import shell from 'shelljs';
-import util from 'util';
 import { SMTPServer } from 'smtp-server';
-import uuid from 'uuid';
-import dns from 'dns';
-import extend from 'extend';
-import { BullMqService } from '@novu/application-generic';
+import util from 'util';
+import { v4 as uuidv4 } from 'uuid';
 
 import { InboundMailService } from './inbound-mail.service';
 import logger from './logger';
+
+const nr = require('newrelic');
 
 const LOG_CONTEXT = 'Mailin';
 
@@ -69,35 +71,31 @@ class Mailin extends events.EventEmitter {
       ? Boolean(configuration.smtpOptions.secure)
       : false;
 
-    callback = callback || function () {};
+    callback = callback || (() => {});
 
     /* Create tmp dir if necessary. */
     if (!fs.existsSync(configuration.tmp)) {
       shell.mkdir('-p', configuration.tmp);
     }
 
-    if (configuration.debug) {
-      configuration.smtpOptions.debug = true;
-    }
-
     /* Basic memory profiling. */
     if (configuration.profile) {
-      logger.info('Enable memory profiling', LOG_CONTEXT);
-      setInterval(function () {
+      logger.info({ context: LOG_CONTEXT }, 'Enable memory profiling');
+      setInterval(() => {
         const memoryUsage = process.memoryUsage();
         const ram = memoryUsage.rss + memoryUsage.heapUsed;
         const million = 1000000;
         logger.info(
+          { context: LOG_CONTEXT },
           `Ram Usage: ${ram / million}mb | rss: ${memoryUsage.rss / million}mb | heapTotal: ${
             memoryUsage.heapTotal / million
-          }mb | heapUsed: ${memoryUsage.heapUsed / million}`,
-          LOG_CONTEXT
+          }mb | heapUsed: ${memoryUsage.heapUsed / million}`
         );
       }, 500);
     }
 
     function validateAddress(addressType, email, envelope) {
-      return new Promise(function (resolve, reject) {
+      return new Promise((resolve, reject) => {
         if (configuration.disableDnsLookup) {
           return resolve();
         }
@@ -128,9 +126,9 @@ class Mailin extends events.EventEmitter {
 
           const domain = /@(.*)/.exec(email)[1];
 
-          const validateViaLocal = function () {
+          const validateViaLocal = () => {
             if (_this.listeners(validateEvent).length) {
-              _this.emit(validateEvent, envelope, email, function (err) {
+              _this.emit(validateEvent, envelope, email, (err) => {
                 if (err) {
                   _this.emit(validationFailedEvent, email);
 
@@ -144,9 +142,9 @@ class Mailin extends events.EventEmitter {
             }
           };
 
-          const validateViaDNS = function () {
+          const validateViaDNS = () => {
             try {
-              dns.resolveMx(domain, function (err, addresses) {
+              dns.resolveMx(domain, (err, addresses) => {
                 if (err || !addresses || !addresses.length) {
                   _this.emit(validationFailedEvent, email);
 
@@ -155,7 +153,8 @@ class Mailin extends events.EventEmitter {
                 validateViaLocal();
               });
             } catch (e) {
-              return reject(e);
+              logger.error({ err: e, context: LOG_CONTEXT }, 'Exception occurred while validating DNS');
+              return reject(new Error(e));
             }
           };
 
@@ -165,162 +164,267 @@ class Mailin extends events.EventEmitter {
             validateViaDNS();
           }
         } catch (e) {
+          logger.error({ err: e, context: LOG_CONTEXT }, 'Exception occurred while validating address');
           reject(e);
         }
       });
     }
 
     function dataReady(connection) {
-      logger.info(`${connection.id} Processing message from ${connection.envelope.mailFrom.address}`, LOG_CONTEXT);
+      return new Promise<void>((resolve, reject) => {
+        nr.startBackgroundTransaction(
+          ObservabilityBackgroundTransactionEnum.INBOUND_MAIL_PROCESSING,
+          'Inbound Mail',
+          () => {
+            const transaction = nr.getTransaction();
 
-      return retrieveRawEmail(connection)
-        .then(function (rawEmail) {
-          return Promise.all([
-            rawEmail,
-            validateDkim(connection, rawEmail),
-            validateSpf(connection),
-            computeSpamScore(connection, rawEmail),
-            parseEmail(connection),
-          ]);
-        })
-        .then(function ([rawEmail, isDkimValid, isSpfValid, spamScore, parsedEmail]) {
-          return Promise.all([
-            connection,
-            rawEmail,
-            isDkimValid,
-            isSpfValid,
-            spamScore,
-            parsedEmail,
-            detectLanguage(connection, parsedEmail.text),
-          ]);
-        })
-        .then(function ([connectionFinalize, rawEmail, isDkimValid, isSpfValid, spamScore, parsedEmail, language]) {
-          const args = [connectionFinalize, rawEmail, isDkimValid, isSpfValid, spamScore, parsedEmail, language];
+            try {
+              /*
+               * Attach only non-PII / non-attacker-controlled metadata. Sender and
+               * recipient addresses, client IPs, and HELO hostnames are intentionally
+               * omitted so attacker-controlled inbound SMTP traffic cannot leak
+               * personal/network identifiers into our APM backend. Use connectionId
+               * to correlate with our own pino logs when investigating an incident.
+               */
+              nr.addCustomAttributes({
+                'mail.connectionId': connection.id,
+                'mail.envelopeRecipientCount': Array.isArray(connection.envelope?.rcptTo)
+                  ? connection.envelope.rcptTo.length
+                  : 0,
+                'mail.hasEnvelopeFrom': Boolean(connection.envelope?.mailFrom?.address),
+                'mail.transmissionType': connection.secure ? 'secure' : 'plain',
+              });
+            } catch (attributeError) {
+              logger.warn(
+                { err: attributeError, context: LOG_CONTEXT, connectionId: connection.id },
+                'Failed to attach inbound mail New Relic attributes'
+              );
+            }
 
-          return finalizeMessage.apply(this, args);
-        })
-        .then(postQueue.bind(null, connection))
-        .then(unlinkFile.bind(null, connection))
-        .catch(function (error) {
-          logger.error(`${connection.id} Unable to finish processing message!!`, LOG_CONTEXT);
-          logger.error(error);
-          throw error;
-        });
-    }
+            logger.info(
+              { context: LOG_CONTEXT, connectionId: connection.id },
+              `${connection.id} Processing message from ${connection.envelope.mailFrom.address}`
+            );
 
-    function retrieveRawEmail(connection) {
-      return fs.promises.readFile(connection.mailPath).then(function (rawEmail) {
-        return rawEmail.toString();
+            return retrieveRawEmail(connection)
+              .then((rawEmail) =>
+                Promise.all([
+                  rawEmail,
+                  validateDkim(connection, rawEmail),
+                  validateSpf(connection),
+                  computeSpamScore(connection, rawEmail),
+                  parseEmail(connection),
+                ])
+              )
+              .then(([rawEmail, isDkimValid, isSpfValid, spamScore, parsedEmail]) =>
+                Promise.all([
+                  connection,
+                  rawEmail,
+                  isDkimValid,
+                  isSpfValid,
+                  spamScore,
+                  parsedEmail,
+                  detectLanguage(connection, parsedEmail.text),
+                ])
+              )
+              .then(function ([
+                connectionFinalize,
+                rawEmail,
+                isDkimValid,
+                isSpfValid,
+                spamScore,
+                parsedEmail,
+                language,
+              ]) {
+                const args = [connectionFinalize, rawEmail, isDkimValid, isSpfValid, spamScore, parsedEmail, language];
+
+                return finalizeMessage.apply(this, args);
+              })
+              .then((finalizedMessage) => {
+                try {
+                  /*
+                   * Only operational/aggregate metadata — no Message-ID (can echo
+                   * sender content), no addresses, no headers. These are safe to
+                   * export to APM regardless of how attacker-controlled the
+                   * underlying email is.
+                   */
+                  nr.addCustomAttributes({
+                    'mail.dkim': finalizedMessage?.dkim,
+                    'mail.spf': finalizedMessage?.spf,
+                    'mail.spamScore': finalizedMessage?.spamScore,
+                    'mail.language': finalizedMessage?.language,
+                    'mail.attachmentCount': Array.isArray(finalizedMessage?.attachments)
+                      ? finalizedMessage.attachments.length
+                      : 0,
+                    'mail.hasInReplyTo': Boolean(finalizedMessage?.inReplyTo),
+                    'mail.referencesCount': Array.isArray(finalizedMessage?.references)
+                      ? finalizedMessage.references.length
+                      : 0,
+                  });
+                } catch (attributeError) {
+                  logger.warn(
+                    { err: attributeError, context: LOG_CONTEXT, connectionId: connection.id },
+                    'Failed to attach inbound mail finalized New Relic attributes'
+                  );
+                }
+
+                return finalizedMessage;
+              })
+              .then(postQueue.bind(null, connection))
+              .then(unlinkFile.bind(null, connection))
+              .then(() => resolve())
+              .catch((error) => {
+                nr.noticeError(error);
+                logger.error(
+                  { err: error, context: LOG_CONTEXT, connectionId: connection.id },
+                  `${connection.id} Unable to finish processing message!!`
+                );
+                reject(error);
+              })
+              .finally(() => {
+                if (transaction) {
+                  transaction.end();
+                }
+              });
+          }
+        );
       });
     }
 
+    function retrieveRawEmail(connection) {
+      return nr.startSegment('inbound-mail/retrieve-raw-email', true, () =>
+        fs.promises.readFile(connection.mailPath).then((rawEmail) => rawEmail.toString())
+      );
+    }
+
     function validateDkim(connection, rawEmail) {
-      if (configuration.disableDkim) {
-        return Promise.resolve(false);
-      }
+      return nr.startSegment('inbound-mail/validate-dkim', true, () => {
+        if (configuration.disableDkim) {
+          return Promise.resolve(false);
+        }
 
-      logger.verbose(`${connection.id} Validating dkim.`, LOG_CONTEXT);
+        logger.verbose({ context: LOG_CONTEXT, connectionId: connection.id }, `${connection.id} Validating dkim.`);
 
-      return mailUtilities.validateDkimAsync(rawEmail).catch(function (err) {
-        logger.error(`${connection.id} Unable to validate dkim. Consider dkim as failed.`, LOG_CONTEXT);
-        logger.error(err);
+        return mailUtilities.validateDkimAsync(rawEmail).catch((err) => {
+          logger.error(
+            { err, context: LOG_CONTEXT, connectionId: connection.id },
+            `${connection.id} Unable to validate dkim. Consider dkim as failed.`
+          );
 
-        return false;
+          return false;
+        });
       });
     }
 
     function validateSpf(connection) {
-      if (configuration.disableSpf) {
-        return Promise.resolve(false);
-      }
+      return nr.startSegment('inbound-mail/validate-spf', true, () => {
+        if (configuration.disableSpf) {
+          return Promise.resolve(false);
+        }
 
-      logger.verbose(`${connection.id} Validating spf.`, LOG_CONTEXT);
+        logger.verbose({ context: LOG_CONTEXT, connectionId: connection.id }, `${connection.id} Validating spf.`);
 
-      /* Get ip and host. */
-      return mailUtilities
-        .validateSpfAsync(connection.remoteAddress, connection.from, connection.clientHostname)
-        .catch(function (err) {
-          logger.error(`${connection.id} Unable to validate spf. Consider spf as failed.`, LOG_CONTEXT);
-          logger.error(err);
+        /* Get ip and host. */
+        return mailUtilities
+          .validateSpfAsync(connection.remoteAddress, connection.from, connection.clientHostname)
+          .catch((err) => {
+            logger.error(
+              { err, context: LOG_CONTEXT, connectionId: connection.id },
+              `${connection.id} Unable to validate spf. Consider spf as failed.`
+            );
 
-          return false;
-        });
+            return false;
+          });
+      });
     }
 
     function computeSpamScore(connection, rawEmail) {
-      if (configuration.disableSpamScore) {
-        return Promise.resolve(0.0);
-      }
+      return nr.startSegment('inbound-mail/compute-spam-score', true, () => {
+        if (configuration.disableSpamScore) {
+          return Promise.resolve(0.0);
+        }
 
-      return mailUtilities.computeSpamScoreAsync(rawEmail).catch(function (err) {
-        logger.error(`${connection.id} Unable to compute spam score. Set spam score to 0.`, LOG_CONTEXT);
-        logger.error(err);
+        return mailUtilities.computeSpamScoreAsync(rawEmail).catch((err) => {
+          logger.error(
+            { err, context: LOG_CONTEXT, connectionId: connection.id },
+            `${connection.id} Unable to compute spam score. Set spam score to 0.`
+          );
 
-        return 0.0;
+          return 0.0;
+        });
       });
     }
 
     function parseEmail(connection) {
-      return new Promise(function (resolve) {
-        logger.verbose(`${connection.id} Parsing email.`, LOG_CONTEXT);
+      return nr.startSegment(
+        'inbound-mail/parse-email',
+        true,
+        () =>
+          new Promise((resolve) => {
+            logger.verbose({ context: LOG_CONTEXT, connectionId: connection.id }, `${connection.id} Parsing email.`);
 
-        /* Prepare the mail parser. */
-        const mailParser = new MailParser();
+            /* Prepare the mail parser. */
+            const mailParser = new MailParser();
 
-        mailParser.on('end', function (mail) {
-          /*
-           * logger.verbose(util.inspect(mail, {
-           * depth: 5
-           * }));
-           */
+            mailParser.on('end', (mail) => {
+              /*
+               * logger.verbose(util.inspect(mail, {
+               * depth: 5
+               * }));
+               */
 
-          /*
-           * Make sure that both text and html versions of the
-           * body are available.
-           */
-          if (!mail.text && !mail.html) {
-            mail.text = '';
-            mail.html = '<div></div>';
-          } else if (!mail.html) {
-            mail.html = _this._convertTextToHtml(mail.text);
-          } else if (!mail.text) {
-            mail.text = _this._convertHtmlToText(mail.html);
-          }
+              /*
+               * Make sure that both text and html versions of the
+               * body are available.
+               */
+              if (!mail.text && !mail.html) {
+                mail.text = '';
+                mail.html = '<div></div>';
+              } else if (!mail.html) {
+                mail.html = _this._convertTextToHtml(mail.text);
+              } else if (!mail.text) {
+                mail.text = _this._convertHtmlToText(mail.html);
+              }
 
-          return resolve(mail);
-        });
+              return resolve(mail);
+            });
 
-        /* Stream the written email to the parser. */
-        fs.createReadStream(connection.mailPath).pipe(mailParser);
-      });
+            /* Stream the written email to the parser. */
+            fs.createReadStream(connection.mailPath).pipe(mailParser);
+          })
+      );
     }
 
     function detectLanguage(connection, text) {
-      logger.verbose(`${connection.id} Detecting language.`, LOG_CONTEXT);
+      return nr.startSegment('inbound-mail/detect-language', true, () => {
+        logger.verbose({ context: LOG_CONTEXT, connectionId: connection.id }, `${connection.id} Detecting language.`);
 
-      let language = '';
+        let language = '';
 
-      const languageDetector = new LanguageDetect();
-      const potentialLanguages = languageDetector.detect(text, 2);
-      if (potentialLanguages.length !== 0) {
-        logger.verbose(
-          `Potential languages: ${util.inspect(potentialLanguages, {
-            depth: 5,
-          })}`,
-          LOG_CONTEXT
-        );
+        const languageDetector = new LanguageDetect();
+        const potentialLanguages = languageDetector.detect(text, 2);
+        if (potentialLanguages.length !== 0) {
+          logger.verbose(
+            { context: LOG_CONTEXT, connectionId: connection.id },
+            `Potential languages: ${util.inspect(potentialLanguages, {
+              depth: 5,
+            })}`
+          );
 
-        /*
-         * Use the first detected language.
-         * potentialLanguages = [['english', 0.5969], ['hungarian', 0.40563]]
-         */
-        // eslint-disable-next-line prefer-destructuring
-        language = potentialLanguages[0][0];
-      } else {
-        logger.info(`${connection.id} Unable to detect language for the current message.`, LOG_CONTEXT);
-      }
+          /*
+           * Use the first detected language.
+           * potentialLanguages = [['english', 0.5969], ['hungarian', 0.40563]]
+           */
+          language = potentialLanguages[0][0];
+        } else {
+          logger.info(
+            { context: LOG_CONTEXT, connectionId: connection.id },
+            `${connection.id} Unable to detect language for the current message.`
+          );
+        }
 
-      return language;
+        return language;
+      });
     }
 
     function finalizeMessage(connection, rawEmail, isDkimValid, isSpfValid, spamScore, parsedEmail, language) {
@@ -344,36 +448,97 @@ class Mailin extends events.EventEmitter {
       parsedEmail.envelopeFrom = connection.envelope.mailFrom;
       parsedEmail.envelopeTo = connection.envelope.rcptTo;
 
+      /*
+       * Preserve threading headers so downstream consumers can correlate
+       * replies back to the original outbound message.
+       * mailparser@0.6.x stores both fields as string[] — normalise them to
+       * the shapes expected by IInboundParseDataDto / InboundEmailParseCommand
+       * so class-validator's @IsString() / @IsOptional() passes correctly.
+       * inReplyTo  → string | null  (RFC 5322 allows only one message-id)
+       * references → string[] | null
+       */
+      parsedEmail.inReplyTo = Array.isArray(parsedEmail.inReplyTo)
+        ? (parsedEmail.inReplyTo[0] ?? null)
+        : (parsedEmail.inReplyTo ?? null);
+
+      parsedEmail.references = Array.isArray(parsedEmail.references)
+        ? parsedEmail.references.length > 0
+          ? parsedEmail.references
+          : null
+        : (parsedEmail.references ?? null);
+
       _this.emit('message', connection, parsedEmail, rawEmail);
 
       return parsedEmail;
     }
 
     function postQueue(connection, finalizedMessage) {
-      return new Promise(function (resolve) {
-        logger.debug(`${connection.id} finalized message is: ${finalizedMessage}`, LOG_CONTEXT);
+      return nr.startSegment(
+        'inbound-mail/post-queue',
+        true,
+        () =>
+          new Promise((resolve) => {
+            logger.debug(
+              { context: LOG_CONTEXT, connectionId: connection.id },
+              `${connection.id} finalized message is: ${finalizedMessage}`
+            );
 
-        logger.info(`${connection.id} Adding mail to queue `, LOG_CONTEXT);
+            logger.info(
+              { context: LOG_CONTEXT, connectionId: connection.id },
+              `${connection.id} Adding mail to queue `
+            );
 
-        const toAddress = getAddressTo(finalizedMessage);
-        const parts: string[] = toAddress.split('@');
-        const username: string = parts[0];
-        const environmentId = username.split('-nv-e=').at(-1);
+            const toAddress = getAddressTo(finalizedMessage);
+            const parts: string[] = toAddress.split('@');
+            const username: string = parts[0];
+            const domainPart: string = parts[1];
 
-        inboundMailService.inboundParseQueueService.add({
-          name: finalizedMessage.messageId,
-          data: finalizedMessage,
-          groupId: environmentId,
-        });
+            /*
+             * Legacy reply-to addresses encode the environmentId in the username segment
+             * (e.g. parse+txnId-nv-e=envId@domain). For plain domain-route addresses
+             * (e.g. support@customer.com) fall back to the domain part as the groupId
+             * so BullMQ can still bucket concurrent jobs by domain.
+             */
+            const isLegacyReplyToRoute = username.includes('-nv-e=');
+            const groupId = isLegacyReplyToRoute ? username.split('-nv-e=').at(-1) : domainPart;
 
-        return resolve();
-      });
+            try {
+              /*
+               * Only emit groupId when it's a Novu-internal environmentId (legacy
+               * reply-to route). For domain-routed mail the groupId is the
+               * recipient's domain — that's tenant/PII-adjacent metadata, so we
+               * report only the routing strategy instead of the domain itself.
+               */
+              nr.addCustomAttributes({
+                'mail.queue.routeType': isLegacyReplyToRoute ? 'reply-to' : 'domain',
+                ...(isLegacyReplyToRoute ? { 'mail.queue.environmentId': groupId } : {}),
+              });
+            } catch {
+              // ignore — instrumentation must never break the pipeline
+            }
+
+            inboundMailService.inboundParseQueueService.add({
+              name: finalizedMessage.messageId,
+              data: finalizedMessage,
+              groupId,
+            });
+
+            return resolve();
+          })
+      );
     }
     function unlinkFile(connection) {
-      /* Don't forget to unlink the tmp file. */
-      return fs.promises.unlink(connection.mailPath).then(function () {
-        logger.info(`${connection.id} End processing message, deleted ${connection.mailPath}`, LOG_CONTEXT);
-      });
+      return nr.startSegment('inbound-mail/unlink-file', true, () =>
+        /* Don't forget to unlink the tmp file. */
+        fs.promises
+          .unlink(connection.mailPath)
+          .then(() => {
+            logger.info(
+              { context: LOG_CONTEXT, connectionId: connection.id },
+              `${connection.id} End processing message, deleted ${connection.mailPath}`
+            );
+          })
+      );
     }
 
     let _session;
@@ -382,37 +547,40 @@ class Mailin extends events.EventEmitter {
       try {
         _session = session;
         const connection = _.cloneDeep(session);
-        connection.id = uuid.v4();
+        connection.id = uuidv4();
         const mailPath = path.join(configuration.tmp, connection.id);
         connection.mailPath = mailPath;
 
         _this.emit('startData', connection);
-        logger.verbose(`Connection id ${connection.id}`, LOG_CONTEXT);
-        logger.info(`${connection.id} Receiving message from ${connection.envelope.mailFrom.address}`, LOG_CONTEXT);
+        logger.verbose({ context: LOG_CONTEXT, connectionId: connection.id }, `Connection id ${connection.id}`);
+        logger.info(
+          { context: LOG_CONTEXT, connectionId: connection.id },
+          `${connection.id} Receiving message from ${connection.envelope.mailFrom.address}`
+        );
 
         _this.emit('startMessage', connection);
 
         stream.pipe(fs.createWriteStream(mailPath));
 
-        stream.on('data', function (chunk) {
+        stream.on('data', (chunk) => {
           _this.emit('data', connection, chunk);
         });
 
-        stream.on('end', function () {
+        stream.on('end', () => {
           dataReady(connection);
           onDataCallback();
         });
 
-        stream.on('close', function () {
+        stream.on('close', () => {
           _this.emit('close', connection);
         });
 
-        stream.on('error', function (error) {
+        stream.on('error', (error) => {
           _this.emit('error', connection, error);
         });
       } catch (error) {
-        logger.error('Exception occurred while performing onData callback', LOG_CONTEXT);
-        logger.error(error);
+        nr.noticeError(error);
+        logger.error({ err: error, context: LOG_CONTEXT }, 'Exception occurred while performing onData callback');
       }
     }
 
@@ -424,14 +592,14 @@ class Mailin extends events.EventEmitter {
 
     function onMailFrom(address, session, streamCallback) {
       _this.emit('validateSender', session, address.address, streamCallback);
-      const ack = function (err) {
+      const ack = (err) => {
         streamCallback(err);
       };
       validateAddress('sender', address.address, session.envelope).then(ack).catch(ack);
     }
 
     function onRcptTo(address, session, streamCallback) {
-      const ack = function (err) {
+      const ack = (err) => {
         streamCallback(err);
       };
       _this.emit('validateRecipient', session, address.address, callback);
@@ -451,23 +619,22 @@ class Mailin extends events.EventEmitter {
 
     this._smtp = server;
 
-    server.listen(configuration.port, configuration.host, function () {
-      logger.info(`Mailin Smtp server listening on port ${configuration.port}`, LOG_CONTEXT);
+    server.listen(configuration.port, configuration.host, () => {
+      logger.info({ context: LOG_CONTEXT }, `Mailin Smtp server listening on port ${configuration.port}`);
     });
 
-    server.on('close', function () {
-      logger.info('Closing smtp server', LOG_CONTEXT);
+    server.on('close', () => {
+      logger.info({ context: LOG_CONTEXT }, 'Closing smtp server');
       _this.emit('close', _session);
     });
 
-    server.on('error', function (error) {
+    server.on('error', (error) => {
       callback(error);
       if (configuration.port < 1000) {
-        logger.error('Ports under 1000 require root privileges.', LOG_CONTEXT);
+        logger.error({ context: LOG_CONTEXT }, 'Ports under 1000 require root privileges.');
       }
 
-      logger.error('Server errored', LOG_CONTEXT);
-      logger.error(error);
+      logger.error({ err: error, context: LOG_CONTEXT }, 'Server errored');
       _this.emit('error', _session, error);
     });
 
@@ -475,8 +642,14 @@ class Mailin extends events.EventEmitter {
   }
 
   public stop(callback: () => void) {
-    callback = callback || function () {};
-    logger.info('Stopping mailin.', LOG_CONTEXT);
+    callback = callback || (() => {});
+    logger.info({ context: LOG_CONTEXT }, 'Stopping mailin.');
+
+    if (!this._smtp) {
+      callback();
+
+      return;
+    }
 
     /*
      * FIXME A bug in the RAI module prevents the callback to be called, so
@@ -514,7 +687,6 @@ interface ISmtpOptions {
   logger: boolean;
   disabledCommands: string[];
   secure?: boolean;
-  debug?: boolean;
 }
 
 interface IConfiguration {

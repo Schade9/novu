@@ -1,9 +1,11 @@
 import { ChatProviderIdEnum } from '@novu/shared';
 import {
   ChannelTypeEnum,
-  ISendMessageSuccessResponse,
+  ENDPOINT_TYPES,
   IChatOptions,
   IChatProvider,
+  ISendMessageSuccessResponse,
+  isChannelDataOfType,
 } from '@novu/stateless';
 import axios from 'axios';
 import { BaseProvider, CasingEnum } from '../../../base.provider';
@@ -19,16 +21,23 @@ export class RocketChatProvider extends BaseProvider implements IChatProvider {
     private config: {
       token: string;
       user: string;
-    },
+    }
   ) {
     super();
   }
 
   async sendMessage(
     options: IChatOptions,
-    bridgeProviderData: WithPassthrough<Record<string, unknown>> = {},
+    bridgeProviderData: WithPassthrough<Record<string, unknown>> = {}
   ): Promise<ISendMessageSuccessResponse> {
-    const roomId = options.channel;
+    const { channelData } = options;
+
+    if (!isChannelDataOfType(channelData, ENDPOINT_TYPES.WEBHOOK)) {
+      throw new Error('Invalid channel data for RocketChat provider');
+    }
+
+    const roomId = channelData.endpoint.channel;
+
     const payload = {
       message: {
         rid: roomId,
@@ -42,14 +51,10 @@ export class RocketChatProvider extends BaseProvider implements IChatProvider {
       'Content-Type': 'application/json',
       ...transformedData.headers,
     };
-    const baseURL = `${options.webhookUrl.toString()}/api/v1/chat.sendMessage`;
-    const { data } = await this.axiosInstance.post(
-      baseURL,
-      transformedData.body,
-      {
-        headers,
-      },
-    );
+    const baseURL = `${channelData.endpoint.url.toString()}/api/v1/chat.sendMessage`;
+    const { data } = await this.axiosInstance.post(baseURL, transformedData.body, {
+      headers,
+    });
 
     return {
       id: data.message._id,

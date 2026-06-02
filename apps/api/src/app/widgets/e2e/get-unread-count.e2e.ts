@@ -1,12 +1,12 @@
+import { Novu } from '@novu/api';
+import { MessageRepository, NotificationTemplateEntity, SubscriberRepository } from '@novu/dal';
+import { ChannelTypeEnum } from '@novu/shared';
+import { UserSession } from '@novu/testing';
 import axios from 'axios';
 import { expect } from 'chai';
-import { MessageRepository, NotificationTemplateEntity, SubscriberRepository } from '@novu/dal';
-import { UserSession } from '@novu/testing';
-import { ChannelTypeEnum } from '@novu/shared';
-import { Novu } from '@novu/api';
 import { initNovuClassSdk } from '../../shared/helpers/e2e/sdk/e2e-sdk.helper';
 
-describe('Unread Count - GET /widget/notifications/unread #novu-v1', function () {
+describe('Unread Count - GET /widget/notifications/unread #novu-v0', () => {
   const messageRepository = new MessageRepository();
   let session: UserSession;
   let template: NotificationTemplateEntity;
@@ -43,12 +43,12 @@ describe('Unread Count - GET /widget/notifications/unread #novu-v1', function ()
     subscriberProfile = profile;
   });
 
-  it('should return unread count with no query', async function () {
-    await novuClient.trigger({ name: template.triggers[0].identifier, to: subscriberId });
-    await novuClient.trigger({ name: template.triggers[0].identifier, to: subscriberId });
-    await novuClient.trigger({ name: template.triggers[0].identifier, to: subscriberId });
+  it('should return unread count with no query', async () => {
+    await novuClient.trigger({ workflowId: template.triggers[0].identifier, to: subscriberId });
+    await novuClient.trigger({ workflowId: template.triggers[0].identifier, to: subscriberId });
+    await novuClient.trigger({ workflowId: template.triggers[0].identifier, to: subscriberId });
 
-    await session.awaitRunningJobs(template._id);
+    await session.waitForJobCompletion(template._id);
 
     const messages = await messageRepository.findBySubscriberChannel(
       session.environment._id,
@@ -72,12 +72,12 @@ describe('Unread Count - GET /widget/notifications/unread #novu-v1', function ()
     expect(unreadFeed.data.count).to.equal(2);
   });
 
-  it('should return unread count with query read false', async function () {
-    await novuClient.trigger({ name: template.triggers[0].identifier, to: subscriberId });
-    await novuClient.trigger({ name: template.triggers[0].identifier, to: subscriberId });
-    await novuClient.trigger({ name: template.triggers[0].identifier, to: subscriberId });
+  it('should return unread count with query read false', async () => {
+    await novuClient.trigger({ workflowId: template.triggers[0].identifier, to: subscriberId });
+    await novuClient.trigger({ workflowId: template.triggers[0].identifier, to: subscriberId });
+    await novuClient.trigger({ workflowId: template.triggers[0].identifier, to: subscriberId });
 
-    await session.awaitRunningJobs(template._id);
+    await session.waitForJobCompletion(template._id);
 
     const messages = await messageRepository.findBySubscriberChannel(
       session.environment._id,
@@ -101,12 +101,12 @@ describe('Unread Count - GET /widget/notifications/unread #novu-v1', function ()
     expect(unreadFeed.data.count).to.equal(2);
   });
 
-  it('should return unread count with query read true', async function () {
-    await novuClient.trigger({ name: template.triggers[0].identifier, to: subscriberId });
-    await novuClient.trigger({ name: template.triggers[0].identifier, to: subscriberId });
-    await novuClient.trigger({ name: template.triggers[0].identifier, to: subscriberId });
+  it('should return unread count with query read true', async () => {
+    await novuClient.trigger({ workflowId: template.triggers[0].identifier, to: subscriberId });
+    await novuClient.trigger({ workflowId: template.triggers[0].identifier, to: subscriberId });
+    await novuClient.trigger({ workflowId: template.triggers[0].identifier, to: subscriberId });
 
-    await session.awaitRunningJobs(template._id);
+    await session.waitForJobCompletion(template._id);
 
     const messages = await messageRepository.findBySubscriberChannel(
       session.environment._id,

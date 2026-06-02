@@ -1,19 +1,17 @@
-import { useMemo } from 'react';
 import { useFormContext } from 'react-hook-form';
-
-import { ControlInput } from '@/components/primitives/control-input';
 import { FormControl, FormField, FormItem, FormMessage } from '@/components/primitives/form/form';
+import { ControlInput } from '@/components/workflow-editor/control-input';
 import { useWorkflow } from '@/components/workflow-editor/workflow-provider';
-import { parseStepVariablesToLiquidVariables } from '@/utils/parseStepVariablesToLiquidVariables';
+import { useParseVariables } from '@/hooks/use-parse-variables';
 import { capitalize } from '@/utils/string';
-import { InputRoot, InputWrapper } from '../../../primitives/input';
+import { InputRoot } from '../../../primitives/input';
 
 const subjectKey = 'subject';
 
 export const BaseSubject = () => {
   const { control } = useFormContext();
-  const { step } = useWorkflow();
-  const variables = useMemo(() => (step ? parseStepVariablesToLiquidVariables(step.variables) : []), [step]);
+  const { step, digestStepBeforeCurrent } = useWorkflow();
+  const { variables, isAllowedVariable } = useParseVariables(step?.variables, digestStepBeforeCurrent?.stepId);
 
   return (
     <FormField
@@ -23,17 +21,17 @@ export const BaseSubject = () => {
         <FormItem className="w-full">
           <FormControl>
             <InputRoot hasError={!!fieldState.error}>
-              <InputWrapper className="h-9 p-2.5">
-                <ControlInput
-                  multiline={false}
-                  indentWithTab={false}
-                  placeholder={capitalize(field.name)}
-                  id={field.name}
-                  value={field.value}
-                  onChange={field.onChange}
-                  variables={variables}
-                />
-              </InputWrapper>
+              <ControlInput
+                multiline={false}
+                indentWithTab={false}
+                placeholder={capitalize(field.name)}
+                id={field.name}
+                value={field.value}
+                onChange={field.onChange}
+                variables={variables}
+                isAllowedVariable={isAllowedVariable}
+                enableTranslations
+              />
             </InputRoot>
           </FormControl>
           <FormMessage />

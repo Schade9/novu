@@ -1,5 +1,5 @@
-import { RiSendPlane2Fill } from 'react-icons/ri';
 import { ChannelTypeEnum, ChatRenderOutput, GeneratePreviewResponseDto } from '@novu/shared';
+import { RiSendPlane2Fill } from 'react-icons/ri';
 
 import { LogoCircle } from '@/components/icons';
 import { Skeleton } from '@/components/primitives/skeleton';
@@ -15,8 +15,9 @@ export const ChatPreview = ({
   variant?: 'mini' | 'default';
 }) => {
   const isValidChatPreview =
-    previewData?.result.type === ChannelTypeEnum.CHAT && previewData?.result.preview.body.length > 0;
-  const body = isValidChatPreview ? ((previewData?.result.preview as ChatRenderOutput)?.body ?? '') : '';
+    previewData?.result?.type === ChannelTypeEnum.CHAT &&
+    (previewData?.result?.preview as ChatRenderOutput)?.body?.length > 0;
+  const body = isValidChatPreview ? ((previewData?.result?.preview as ChatRenderOutput)?.body ?? '') : '';
 
   return (
     <div className="relative w-full rounded-xl border border-dashed border-[#E1E4EA] p-3">
@@ -37,7 +38,7 @@ export const ChatPreview = ({
               <Skeleton className="h-4 w-1/2" />
             ) : (
               <span
-                className={cn('text-foreground-950 min-h-4 text-xs font-normal', {
+                className={cn('text-foreground-950 min-h-4 whitespace-pre-wrap text-xs font-normal', {
                   'line-clamp-3': variant === 'mini',
                 })}
                 title={variant === 'mini' ? body : undefined}
@@ -58,7 +59,7 @@ export const ChatPreview = ({
           </div>
         </div>
       </div>
-      <div className="to-background absolute -bottom-1 -left-1 -right-1 z-0 h-16 bg-gradient-to-b from-transparent to-80%" />
+      <div className="to-background absolute -bottom-1 -left-1 -right-1 z-0 h-16 bg-linear-to-b from-transparent to-80%" />
     </div>
   );
 };

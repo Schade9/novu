@@ -9,56 +9,74 @@ import {
   Post,
   Put,
   Query,
-  UseGuards,
   UseInterceptors,
 } from '@nestjs/common/decorators';
-import { ApiTags } from '@nestjs/swagger';
-import { DeleteWorkflowCommand, DeleteWorkflowUseCase, UserAuthGuard, UserSession } from '@novu/application-generic';
-import {
-  CreateWorkflowDto,
-  DirectionEnum,
-  GeneratePreviewRequestDto,
-  GeneratePreviewResponseDto,
-  GetListQueryParams,
-  ListWorkflowResponse,
-  PatchStepDataDto,
-  PatchWorkflowDto,
-  StepResponseDto,
-  SyncWorkflowDto,
-  UpdateWorkflowDto,
-  UserSessionData,
-  WorkflowOriginEnum,
-  WorkflowResponseDto,
-  WorkflowTestDataResponseDto,
-} from '@novu/shared';
-import { ApiCommonResponses } from '../shared/framework/response.decorator';
-import { UserAuthentication } from '../shared/framework/swagger/api.key.security';
-import { ParseSlugEnvironmentIdPipe } from './pipes/parse-slug-env-id.pipe';
-import { ParseSlugIdPipe } from './pipes/parse-slug-id.pipe';
+import { ApiBody, ApiExcludeEndpoint, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import {
   BuildStepDataCommand,
   BuildStepDataUsecase,
+  ExternalApiAccessible,
+  GeneratePreviewRequestDto,
+  GeneratePreviewResponseDto,
+  GetWorkflowCommand,
+  GetWorkflowUseCase,
+  ParseSlugEnvironmentIdPipe,
+  ParseSlugIdPipe,
+  PreviewCommand,
+  PreviewUsecase,
+  RequirePermissions,
+  StepResponseDto,
+  UpsertStepDataCommand,
+  UpsertWorkflowCommand,
+  UpsertWorkflowUseCase,
+  UserSession,
+  WorkflowResponseDto,
+} from '@novu/application-generic';
+import {
+  ApiRateLimitCategoryEnum,
+  DirectionEnum,
+  PermissionsEnum,
+  ResourceOriginEnum,
+  UserSessionData,
+} from '@novu/shared';
+import { RequireAuthentication } from '../auth/framework/auth.decorator';
+import { ThrottlerCategory } from '../rate-limiting/guards/throttler.decorator';
+import { ApiCommonResponses, ApiResponse } from '../shared/framework/response.decorator';
+import { SdkGroupName, SdkMethodName } from '../shared/framework/swagger/sdk.decorators';
+import { DeleteWorkflowCommand } from '../workflows-v1/usecases/delete-workflow/delete-workflow.command';
+import { DeleteWorkflowUseCase } from '../workflows-v1/usecases/delete-workflow/delete-workflow.usecase';
+import {
+  CreateWorkflowDto,
+  DuplicateWorkflowDto,
+  GetListQueryParamsDto,
+  ListWorkflowResponse,
+  PatchWorkflowDto,
+  StepUpsertDto,
+  SyncWorkflowDto,
+  TestHttpEndpointRequestDto,
+  TestHttpEndpointResponseDto,
+  UpdateWorkflowDto,
+  WorkflowTestDataResponseDto,
+} from './dtos';
+import {
   BuildWorkflowTestDataUseCase,
+  DuplicateWorkflowCommand,
+  DuplicateWorkflowUseCase,
+  ListWorkflowsCommand,
+  ListWorkflowsUseCase,
+  SyncToEnvironmentCommand,
+  SyncToEnvironmentUseCase,
+  TestHttpEndpointCommand,
+  TestHttpEndpointUsecase,
   WorkflowTestDataCommand,
 } from './usecases';
-import { GeneratePreviewCommand } from './usecases/generate-preview/generate-preview.command';
-import { GeneratePreviewUsecase } from './usecases/generate-preview/generate-preview.usecase';
-import { GetWorkflowCommand } from './usecases/get-workflow/get-workflow.command';
-import { GetWorkflowUseCase } from './usecases/get-workflow/get-workflow.usecase';
-import { ListWorkflowsUseCase } from './usecases/list-workflows/list-workflow.usecase';
-import { ListWorkflowsCommand } from './usecases/list-workflows/list-workflows.command';
-import { PatchStepCommand } from './usecases/patch-step-data';
-import { PatchStepUsecase } from './usecases/patch-step-data/patch-step.usecase';
 import { PatchWorkflowCommand, PatchWorkflowUsecase } from './usecases/patch-workflow';
-import { SyncToEnvironmentCommand } from './usecases/sync-to-environment/sync-to-environment.command';
-import { SyncToEnvironmentUseCase } from './usecases/sync-to-environment/sync-to-environment.usecase';
-import { UpsertWorkflowCommand } from './usecases/upsert-workflow/upsert-workflow.command';
-import { UpsertWorkflowUseCase } from './usecases/upsert-workflow/upsert-workflow.usecase';
 
+@ThrottlerCategory(ApiRateLimitCategoryEnum.CONFIGURATION)
 @ApiCommonResponses()
 @Controller({ path: `/workflows`, version: '2' })
 @UseInterceptors(ClassSerializerInterceptor)
-@UserAuthentication()
+@RequireAuthentication()
 @ApiTags('Workflows')
 export class WorkflowController {
   constructor(
@@ -67,29 +85,52 @@ export class WorkflowController {
     private listWorkflowsUseCase: ListWorkflowsUseCase,
     private deleteWorkflowUsecase: DeleteWorkflowUseCase,
     private syncToEnvironmentUseCase: SyncToEnvironmentUseCase,
-    private generatePreviewUseCase: GeneratePreviewUsecase,
+    private previewUsecase: PreviewUsecase,
     private buildWorkflowTestDataUseCase: BuildWorkflowTestDataUseCase,
     private buildStepDataUsecase: BuildStepDataUsecase,
-    private patchStepDataUsecase: PatchStepUsecase,
-    private patchWorkflowUsecase: PatchWorkflowUsecase
+    private patchWorkflowUsecase: PatchWorkflowUsecase,
+    private duplicateWorkflowUseCase: DuplicateWorkflowUseCase,
+    private testHttpEndpointUsecase: TestHttpEndpointUsecase
   ) {}
 
   @Post('')
-  @UseGuards(UserAuthGuard)
+  @ApiOperation({
+    summary: 'Create a workflow',
+    description: 'Creates a new workflow in the Novu Cloud environment',
+  })
+  @ExternalApiAccessible()
+  @ApiBody({ type: CreateWorkflowDto, description: 'Workflow creation details' })
+  @ApiResponse(WorkflowResponseDto, 201)
+  @RequirePermissions(PermissionsEnum.WORKFLOW_WRITE)
   async create(
     @UserSession(ParseSlugEnvironmentIdPipe) user: UserSessionData,
     @Body() createWorkflowDto: CreateWorkflowDto
   ): Promise<WorkflowResponseDto> {
+    const upsertSteps = this.normalizeSteps(createWorkflowDto.steps);
+
     return this.upsertWorkflowUseCase.execute(
       UpsertWorkflowCommand.create({
-        workflowDto: { ...createWorkflowDto, origin: WorkflowOriginEnum.NOVU_CLOUD },
+        preserveWorkflowId: true,
+        workflowDto: {
+          ...createWorkflowDto,
+          steps: upsertSteps,
+          origin: ResourceOriginEnum.NOVU_CLOUD,
+        },
         user,
       })
     );
   }
 
   @Put(':workflowId/sync')
-  @UseGuards(UserAuthGuard)
+  @ExternalApiAccessible()
+  @ApiOperation({
+    summary: 'Sync a workflow',
+    description: 'Synchronizes a workflow to the target environment',
+  })
+  @ApiBody({ type: SyncWorkflowDto, description: 'Sync workflow details' })
+  @ApiResponse(WorkflowResponseDto)
+  @SdkMethodName('sync')
+  @RequirePermissions(PermissionsEnum.WORKFLOW_WRITE)
   async sync(
     @UserSession() user: UserSessionData,
     @Param('workflowId', ParseSlugIdPipe) workflowIdOrInternalId: string,
@@ -105,23 +146,54 @@ export class WorkflowController {
   }
 
   @Put(':workflowId')
-  @UseGuards(UserAuthGuard)
+  @ExternalApiAccessible()
+  @ApiOperation({
+    summary: 'Update a workflow',
+    description: 'Updates the details of an existing workflow, here **workflowId** is the identifier of the workflow',
+  })
+  @ApiBody({ type: UpdateWorkflowDto, description: 'Workflow update details' })
+  @ApiResponse(WorkflowResponseDto)
+  @RequirePermissions(PermissionsEnum.WORKFLOW_WRITE)
   async update(
     @UserSession(ParseSlugEnvironmentIdPipe) user: UserSessionData,
     @Param('workflowId', ParseSlugIdPipe) workflowIdOrInternalId: string,
     @Body() updateWorkflowDto: UpdateWorkflowDto
   ): Promise<WorkflowResponseDto> {
+    const upsertSteps = this.normalizeSteps(updateWorkflowDto.steps);
+
     return await this.upsertWorkflowUseCase.execute(
       UpsertWorkflowCommand.create({
-        workflowDto: updateWorkflowDto,
+        workflowDto: {
+          ...updateWorkflowDto,
+          steps: upsertSteps,
+        },
         user,
         workflowIdOrInternalId,
       })
     );
   }
 
+  private normalizeSteps(steps: StepUpsertDto[]): UpsertStepDataCommand[] {
+    return steps.map((step: StepUpsertDto) => ({
+      ...step,
+      controlValues: (step.controlValues as Record<string, unknown> | null | undefined) ?? null,
+    }));
+  }
+
   @Get(':workflowId')
-  @UseGuards(UserAuthGuard)
+  @ExternalApiAccessible()
+  @ApiOperation({
+    summary: 'Retrieve a workflow',
+    description: 'Fetches details of a specific workflow by its unique identifier **workflowId**',
+  })
+  @ApiResponse(WorkflowResponseDto)
+  @ApiQuery({
+    name: 'environmentId',
+    type: String,
+    required: false,
+  })
+  @SdkMethodName('get')
+  @RequirePermissions(PermissionsEnum.WORKFLOW_READ)
   async getWorkflow(
     @UserSession(ParseSlugEnvironmentIdPipe) user: UserSessionData,
     @Param('workflowId', ParseSlugIdPipe) workflowIdOrInternalId: string,
@@ -130,16 +202,21 @@ export class WorkflowController {
     return this.getWorkflowUseCase.execute(
       GetWorkflowCommand.create({
         workflowIdOrInternalId,
-        user: {
-          ...user,
-          environmentId: environmentId || user.environmentId,
-        },
+        user,
+        environmentId,
       })
     );
   }
 
   @Delete(':workflowId')
+  @ExternalApiAccessible()
   @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Delete a workflow',
+    description: 'Removes a specific workflow by its unique identifier **workflowId**',
+  })
+  @SdkMethodName('delete')
+  @RequirePermissions(PermissionsEnum.WORKFLOW_WRITE)
   async removeWorkflow(
     @UserSession(ParseSlugEnvironmentIdPipe) user: UserSessionData,
     @Param('workflowId', ParseSlugIdPipe) workflowIdOrInternalId: string
@@ -155,10 +232,17 @@ export class WorkflowController {
   }
 
   @Get('')
-  @UseGuards(UserAuthGuard)
+  @ExternalApiAccessible()
+  @ApiOperation({
+    summary: 'List all workflows',
+    description: 'Retrieves a list of workflows with optional filtering and pagination',
+  })
+  @ApiResponse(ListWorkflowResponse)
+  @SdkMethodName('list')
+  @RequirePermissions(PermissionsEnum.WORKFLOW_READ)
   async searchWorkflows(
     @UserSession(ParseSlugEnvironmentIdPipe) user: UserSessionData,
-    @Query() query: GetListQueryParams
+    @Query() query: GetListQueryParamsDto
   ): Promise<ListWorkflowResponse> {
     return this.listWorkflowsUseCase.execute(
       ListWorkflowsCommand.create({
@@ -167,21 +251,56 @@ export class WorkflowController {
         orderDirection: query.orderDirection ?? DirectionEnum.DESC,
         orderBy: query.orderBy ?? 'createdAt',
         searchQuery: query.query,
+        tags: query.tags,
+        status: query.status,
         user,
       })
     );
   }
 
+  @Post(':workflowId/duplicate')
+  @ApiOperation({
+    summary: 'Duplicate a workflow',
+    description:
+      'Duplicates a workflow by its unique identifier **workflowId**. This will create a new workflow with the same steps and settings.',
+  })
+  @ApiBody({ type: DuplicateWorkflowDto })
+  @ApiResponse(WorkflowResponseDto, 201)
+  @SdkMethodName('duplicate')
+  @RequirePermissions(PermissionsEnum.WORKFLOW_WRITE)
+  async duplicateWorkflow(
+    @UserSession(ParseSlugEnvironmentIdPipe) user: UserSessionData,
+    @Param('workflowId', ParseSlugIdPipe) workflowIdOrInternalId: string,
+    @Body() duplicateWorkflowDto: DuplicateWorkflowDto
+  ): Promise<WorkflowResponseDto> {
+    return this.duplicateWorkflowUseCase.execute(
+      DuplicateWorkflowCommand.create({
+        user,
+        workflowIdOrInternalId,
+        overrides: duplicateWorkflowDto,
+      })
+    );
+  }
+
   @Post('/:workflowId/step/:stepId/preview')
-  @UseGuards(UserAuthGuard)
+  @ExternalApiAccessible()
+  @ApiOperation({
+    summary: 'Generate a step preview',
+    description: 'Generates a preview for a specific workflow step by its unique identifier **stepId**',
+  })
+  @ApiBody({ type: GeneratePreviewRequestDto, description: 'Preview generation details' })
+  @ApiResponse(GeneratePreviewResponseDto, 201)
+  @SdkGroupName('Workflows.Steps')
+  @SdkMethodName('generatePreview')
+  @RequirePermissions(PermissionsEnum.WORKFLOW_READ)
   async generatePreview(
     @UserSession(ParseSlugEnvironmentIdPipe) user: UserSessionData,
     @Param('workflowId', ParseSlugIdPipe) workflowIdOrInternalId: string,
     @Param('stepId', ParseSlugIdPipe) stepIdOrInternalId: string,
     @Body() generatePreviewRequestDto: GeneratePreviewRequestDto
   ): Promise<GeneratePreviewResponseDto> {
-    return await this.generatePreviewUseCase.execute(
-      GeneratePreviewCommand.create({
+    return await this.previewUsecase.execute(
+      PreviewCommand.create({
         user,
         workflowIdOrInternalId,
         stepIdOrInternalId,
@@ -190,8 +309,42 @@ export class WorkflowController {
     );
   }
 
+  @Post('/steps/test-http-request')
+  @ApiOperation({
+    summary: 'Test HTTP request step',
+    description:
+      'Executes the configured HTTP request for a step, resolving template variables using the provided preview payload',
+  })
+  @ApiBody({
+    type: TestHttpEndpointRequestDto,
+    description: 'Control values and preview payload for variable resolution',
+  })
+  @ApiResponse(TestHttpEndpointResponseDto, 201)
+  @ApiExcludeEndpoint()
+  @RequirePermissions(PermissionsEnum.WORKFLOW_WRITE)
+  async testHttpEndpoint(
+    @UserSession(ParseSlugEnvironmentIdPipe) user: UserSessionData,
+    @Body() body: TestHttpEndpointRequestDto
+  ): Promise<TestHttpEndpointResponseDto> {
+    return this.testHttpEndpointUsecase.execute(
+      TestHttpEndpointCommand.create({
+        user,
+        controlValues: body.controlValues,
+        previewPayload: body.previewPayload,
+      })
+    );
+  }
+
   @Get('/:workflowId/steps/:stepId')
-  @UseGuards(UserAuthGuard)
+  @ApiOperation({
+    summary: 'Retrieve workflow step',
+    description: 'Retrieves data for a specific step in a workflow',
+  })
+  @ApiResponse(StepResponseDto)
+  @ExternalApiAccessible()
+  @SdkGroupName('Workflows.Steps')
+  @SdkMethodName('retrieve')
+  @RequirePermissions(PermissionsEnum.WORKFLOW_READ)
   async getWorkflowStepData(
     @UserSession(ParseSlugEnvironmentIdPipe) user: UserSessionData,
     @Param('workflowId', ParseSlugIdPipe) workflowIdOrInternalId: string,
@@ -202,26 +355,16 @@ export class WorkflowController {
     );
   }
 
-  @Patch('/:workflowId/steps/:stepId')
-  @UseGuards(UserAuthGuard)
-  async patchWorkflowStepData(
-    @UserSession(ParseSlugEnvironmentIdPipe) user: UserSessionData,
-    @Param('workflowId', ParseSlugIdPipe) workflowIdOrInternalId: string,
-    @Param('stepId', ParseSlugIdPipe) stepIdOrInternalId: string,
-    @Body() patchStepDataDto: PatchStepDataDto
-  ): Promise<StepResponseDto> {
-    return await this.patchStepDataUsecase.execute(
-      PatchStepCommand.create({
-        user,
-        workflowIdOrInternalId,
-        stepIdOrInternalId,
-        ...patchStepDataDto,
-      })
-    );
-  }
-
   @Patch('/:workflowId')
-  @UseGuards(UserAuthGuard)
+  @ExternalApiAccessible()
+  @ApiOperation({
+    summary: 'Update a workflow',
+    description: 'Partially updates a workflow by its unique identifier **workflowId**',
+  })
+  @ApiBody({ type: PatchWorkflowDto, description: 'Workflow patch details' })
+  @ApiResponse(WorkflowResponseDto)
+  @SdkMethodName('patch')
+  @RequirePermissions(PermissionsEnum.WORKFLOW_WRITE)
   async patchWorkflow(
     @UserSession(ParseSlugEnvironmentIdPipe) user: UserSessionData,
     @Param('workflowId', ParseSlugIdPipe) workflowIdOrInternalId: string,
@@ -233,7 +376,14 @@ export class WorkflowController {
   }
 
   @Get('/:workflowId/test-data')
-  @UseGuards(UserAuthGuard)
+  @ApiOperation({
+    summary: 'Retrieve workflow test data',
+    description: 'Retrieves test data for a specific workflow by its unique identifier **workflowId**',
+  })
+  @ApiResponse(WorkflowTestDataResponseDto)
+  @SdkMethodName('getTestData')
+  @RequirePermissions(PermissionsEnum.WORKFLOW_READ)
+  @ApiExcludeEndpoint()
   async getWorkflowTestData(
     @UserSession() user: UserSessionData,
     @Param('workflowId', ParseSlugIdPipe) workflowIdOrInternalId: string

@@ -1,21 +1,17 @@
 import mongoose, { Schema } from 'mongoose';
-
-import { TopicSubscribersDBModel } from './topic-subscribers.entity';
-
 import { schemaOptions } from '../schema-default.options';
+import { TopicSubscribersDBModel } from './topic-subscribers.entity';
 
 const topicSubscribersSchema = new Schema<TopicSubscribersDBModel>(
   {
     _environmentId: {
       type: Schema.Types.ObjectId,
       ref: 'Environment',
-      index: true,
       required: true,
     },
     _organizationId: {
       type: Schema.Types.ObjectId,
       ref: 'Organization',
-      index: true,
       required: true,
     },
     _subscriberId: {
@@ -32,31 +28,43 @@ const topicSubscribersSchema = new Schema<TopicSubscribersDBModel>(
     },
     topicKey: {
       type: Schema.Types.String,
-      index: true,
       required: true,
     },
     externalSubscriberId: Schema.Types.String,
+    name: {
+      type: Schema.Types.String,
+      required: false,
+    },
+    identifier: {
+      type: Schema.Types.String,
+    },
+    contextKeys: {
+      type: [Schema.Types.String],
+      default: undefined,
+    },
   },
   schemaOptions
 );
-
-topicSubscribersSchema.index({
-  _environmentId: 1,
-});
-
-topicSubscribersSchema.index({
-  _organizationId: 1,
-});
-
-topicSubscribersSchema.index({
-  _subscriberId: 1,
-});
 
 topicSubscribersSchema.index({
   _topicId: 1,
 });
 
 topicSubscribersSchema.index({
+  topicKey: 1,
+});
+
+topicSubscribersSchema.index(
+  {
+    _environmentId: 1,
+    identifier: 1,
+  },
+  { unique: true }
+);
+
+topicSubscribersSchema.index({
+  _subscriberId: 1,
+  _environmentId: 1,
   topicKey: 1,
 });
 

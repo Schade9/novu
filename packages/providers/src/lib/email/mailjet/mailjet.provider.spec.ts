@@ -21,8 +21,7 @@ const response = {
             Email: 'testTo@test2.com',
             MessageUUID: 'a6da-4b1b-ad92-066cfb314d66',
             MessageID: '5764607616719',
-            MessageHref:
-              'https://api.mailjet.com/v3/REST/message/5764607616719',
+            MessageHref: 'https://api.mailjet.com/v3/REST/message/5764607616719',
           },
         ],
         Cc: [],
@@ -34,8 +33,8 @@ const response = {
 
 const requestFn = vi.fn().mockResolvedValue(response);
 
-vi.mock(import('node-mailjet'), async (importOriginal) => {
-  const actual = await importOriginal();
+vi.mock('node-mailjet', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node-mailjet')>();
 
   return {
     ...actual,
@@ -70,8 +69,8 @@ test('should trigger mailjet library correctly and return proper response', asyn
     textPart: 'test',
   });
 
-  expect(requestFn).toBeCalledTimes(1);
-  expect(requestFn).toBeCalledWith({
+  expect(requestFn).toHaveBeenCalledTimes(1);
+  expect(requestFn).toHaveBeenCalledWith({
     Messages: [
       {
         From: { Email: mockConfig.from, Name: mockConfig.senderName },
@@ -98,7 +97,7 @@ test('should trigger mailjet library correctly and return proper response with _
     },
   });
 
-  expect(requestFn).toBeCalledWith({
+  expect(requestFn).toHaveBeenCalledWith({
     Messages: [
       {
         From: { Email: mockConfig.from, Name: mockConfig.senderName },

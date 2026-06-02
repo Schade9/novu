@@ -1,11 +1,11 @@
 import { EmailProviderIdEnum } from '@novu/shared';
 import {
   ChannelTypeEnum,
+  CheckIntegrationResponseEnum,
+  ICheckIntegrationResponse,
   IEmailOptions,
   IEmailProvider,
   ISendMessageSuccessResponse,
-  ICheckIntegrationResponse,
-  CheckIntegrationResponseEnum,
 } from '@novu/stateless';
 import nodemailer, { SendMailOptions, Transporter } from 'nodemailer';
 import { BaseProvider, CasingEnum } from '../../../base.provider';
@@ -22,7 +22,7 @@ export class Outlook365Provider extends BaseProvider implements IEmailProvider {
       from: string;
       senderName: string;
       password: string;
-    },
+    }
   ) {
     super();
     this.transports = nodemailer.createTransport({
@@ -42,12 +42,11 @@ export class Outlook365Provider extends BaseProvider implements IEmailProvider {
 
   async sendMessage(
     options: IEmailOptions,
-    bridgeProviderData: WithPassthrough<Record<string, unknown>> = {},
+    bridgeProviderData: WithPassthrough<Record<string, unknown>> = {}
   ): Promise<ISendMessageSuccessResponse> {
     const mailData = this.createMailData(options);
-    const info = await this.transports.sendMail(
-      this.transform(bridgeProviderData, mailData).body,
-    );
+    const merged = this.transform(bridgeProviderData, mailData);
+    const info = await this.transports.sendMail(merged.body);
 
     return {
       id: info?.messageId,
@@ -55,9 +54,7 @@ export class Outlook365Provider extends BaseProvider implements IEmailProvider {
     };
   }
 
-  async checkIntegration(
-    options: IEmailOptions,
-  ): Promise<ICheckIntegrationResponse> {
+  async checkIntegration(options: IEmailOptions): Promise<ICheckIntegrationResponse> {
     try {
       const mailData = this.createMailData(options);
       await this.transports.sendMail(mailData);
@@ -86,15 +83,23 @@ export class Outlook365Provider extends BaseProvider implements IEmailProvider {
       subject: options.subject,
       html: options.html,
       text: options.text,
+      ...(options.alternatives?.length ? { alternatives: options.alternatives } : {}),
       attachments: options.attachments?.map((attachment) => ({
-        filename: attachment?.name,
+        filename: attachment.name,
         content: attachment.file,
         contentType: attachment.mime,
+        cid: attachment.cid,
+        contentDisposition:
+          (attachment.disposition as 'inline' | 'attachment') ?? (attachment.cid ? 'inline' : undefined),
       })),
     };
 
     if (options.replyTo) {
       sendMailOptions.replyTo = options.replyTo;
+    }
+
+    if (options.headers && Object.keys(options.headers).length > 0) {
+      sendMailOptions.headers = options.headers;
     }
 
     return sendMailOptions;

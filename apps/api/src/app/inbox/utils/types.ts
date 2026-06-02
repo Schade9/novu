@@ -1,55 +1,39 @@
-import type { ChannelTypeEnum, Redirect, IPreferenceChannels, PreferenceLevelEnum } from '@novu/shared';
-
-export type Subscriber = {
-  id: string;
-  firstName?: string;
-  lastName?: string;
-  avatar?: string;
-  subscriberId: string;
-};
-
-type Action = {
-  label: string;
-  isCompleted: boolean;
-  redirect?: Redirect;
-};
-
-export type InboxNotification = {
-  id: string;
-  subject?: string;
-  body: string;
-  to: Subscriber;
-  isRead: boolean;
-  isArchived: boolean;
-  createdAt: string;
-  readAt?: string | null;
-  archivedAt?: string | null;
-  avatar?: string;
-  primaryAction?: Action;
-  secondaryAction?: Action;
-  channelType: ChannelTypeEnum;
-  tags?: string[];
-  data?: Record<string, unknown>;
-  redirect?: Redirect;
-};
+import type {
+  CustomDataType,
+  IPreferenceChannels,
+  PreferenceLevelEnum,
+  Schedule,
+  SeverityLevelEnum,
+  TagsFilter,
+} from '@novu/shared';
+import type { RulesLogic } from 'json-logic-js';
 
 export type NotificationFilter = {
-  tags?: string[];
+  tags?: TagsFilter;
   read?: boolean;
   archived?: boolean;
-};
-
-export type Workflow = {
-  id: string;
-  identifier: string;
-  name: string;
-  critical: boolean;
-  tags?: string[];
+  snoozed?: boolean;
+  seen?: boolean;
+  data?: string;
+  severity?: SeverityLevelEnum | SeverityLevelEnum[];
+  createdGte?: number;
+  createdLte?: number;
 };
 
 export type InboxPreference = {
   level: PreferenceLevelEnum;
+  subscriptionId?: string;
   enabled: boolean;
+  condition?: RulesLogic;
   channels: IPreferenceChannels;
-  workflow?: Workflow;
+  workflow?: {
+    id: string;
+    identifier: string;
+    name: string;
+    critical: boolean;
+    tags?: string[];
+    data?: CustomDataType;
+    severity: SeverityLevelEnum;
+  };
+  schedule?: Schedule;
 };

@@ -7,15 +7,12 @@ const mockConfig = {
   senderName: 'Test Sender',
 };
 
-test('should trigger mandrill correctly', async () => {
+test('should send a standard email through Mandrill', async () => {
   const provider = new MandrillProvider(mockConfig);
-  const spy = vi
-    // eslint-disable-next-line @typescript-eslint/dot-notation
-    .spyOn(provider['transporter'].messages, 'send')
-    .mockImplementation(async () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return [{}] as any;
-    });
+  const spy = vi.spyOn(provider['transporter'].messages, 'send').mockImplementation(async () => {
+    return [{}] as any;
+  });
+
   const mockNovuMessage = {
     to: ['test2@test.com'],
     subject: 'test subject',
@@ -38,12 +35,7 @@ test('should trigger mandrill correctly', async () => {
       from_name: mockConfig.senderName,
       subject: mockNovuMessage.subject,
       html: mockNovuMessage.html,
-      to: [
-        {
-          email: mockNovuMessage.to[0],
-          type: 'to',
-        },
-      ],
+      to: [{ email: mockNovuMessage.to[0], type: 'to' }],
       attachments: [
         {
           content: Buffer.from('test').toString('base64'),
@@ -55,15 +47,97 @@ test('should trigger mandrill correctly', async () => {
   });
 });
 
+test('should forward custom headers in message.headers', async () => {
+  const provider = new MandrillProvider(mockConfig);
+  const spy = vi.spyOn(provider['transporter'].messages, 'send').mockImplementation(async () => {
+
+    return [{}] as any;
+  });
+
+  await provider.sendMessage({
+    to: ['test2@test.com'],
+    subject: 'test subject',
+    html: '<div> Mail Content </div>',
+    headers: {
+      'In-Reply-To': '<original-message-id@example.com>',
+      References: '<original-message-id@example.com>',
+    },
+  });
+
+  expect(spy).toHaveBeenCalledWith(
+    expect.objectContaining({
+      message: expect.objectContaining({
+        headers: {
+          'In-Reply-To': '<original-message-id@example.com>',
+          References: '<original-message-id@example.com>',
+        },
+      }),
+    })
+  );
+});
+
+test('should not add headers to message when no custom headers provided', async () => {
+  const provider = new MandrillProvider(mockConfig);
+  const spy = vi.spyOn(provider['transporter'].messages, 'send').mockImplementation(async () => {
+
+    return [{}] as any;
+  });
+
+  await provider.sendMessage({
+    to: ['test2@test.com'],
+    subject: 'test subject',
+    html: '<div> Mail Content </div>',
+  });
+
+  const payload = spy.mock.calls[0][0];
+
+  expect(payload.message).not.toHaveProperty('headers');
+});
+
+test('should send an email using a Mandrill template', async () => {
+  const provider = new MandrillProvider(mockConfig);
+  const spy = vi.spyOn(provider['transporter'].messages, 'sendTemplate').mockImplementation(async () => {
+    return [{}] as any;
+  });
+
+  const mockNovuMessage = {
+    to: ['test2@test.com'],
+    subject: 'test subject',
+    html: undefined,
+    customData: {
+      templateId: 'welcome-template',
+      variables: {
+        FIRST_NAME: 'John',
+        LAST_NAME: 'Doe',
+      },
+    },
+  };
+
+  await provider.sendMessage(mockNovuMessage);
+
+  expect(spy).toHaveBeenCalled();
+  expect(spy).toHaveBeenCalledWith({
+    template_name: mockNovuMessage.customData.templateId,
+    template_content: [],
+    message: {
+      from_email: mockConfig.from,
+      from_name: mockConfig.senderName,
+      subject: mockNovuMessage.subject,
+      html: mockNovuMessage.html,
+      to: [{ email: mockNovuMessage.to[0], type: 'to' }],
+      global_merge_vars: [
+        { name: 'FIRST_NAME', content: 'John' },
+        { name: 'LAST_NAME', content: 'Doe' },
+      ],
+    },
+  });
+});
+
 test('should trigger mandrill correctly with _passthrough', async () => {
   const provider = new MandrillProvider(mockConfig);
-  const spy = vi
-    // eslint-disable-next-line @typescript-eslint/dot-notation
-    .spyOn(provider['transporter'].messages, 'send')
-    .mockImplementation(async () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return [{}] as any;
-    });
+  const spy = vi.spyOn(provider['transporter'].messages, 'send').mockImplementation(async () => {
+    return [{}] as any;
+  });
   const mockNovuMessage = {
     to: ['test2@test.com'],
     subject: 'test subject',
@@ -113,12 +187,9 @@ test('should trigger mandrill correctly with _passthrough', async () => {
 
 test('should check provider integration correctly', async () => {
   const provider = new MandrillProvider(mockConfig);
-  const spy = vi
-    // eslint-disable-next-line @typescript-eslint/dot-notation
-    .spyOn(provider['transporter'].users, 'ping')
-    .mockImplementation(async () => {
-      return 'PONG!';
-    });
+  const spy = vi.spyOn(provider['transporter'].users, 'ping').mockImplementation(async () => {
+    return 'PONG!';
+  });
 
   const response = await provider.checkIntegration();
   expect(spy).toHaveBeenCalled();

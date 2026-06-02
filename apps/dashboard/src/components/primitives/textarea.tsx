@@ -20,27 +20,29 @@ const Textarea = React.forwardRef<
       className={cn(
         [
           // base
-          'text-paragraph-xs text-text-strong block w-full resize-none outline-none',
+          'text-paragraph-xs text-text-strong block w-full resize-none outline-hidden',
           !simple && ['pointer-events-auto h-full min-h-[82px] bg-transparent pl-3 pr-2.5 pt-2.5'],
           simple && [
             'bg-bg-white shadow-regular-xs min-h-28 rounded-xl px-3 py-2.5',
             'ring-stroke-soft ring-1 ring-inset',
             'transition duration-200 ease-out',
             // hover
-            'hover:[&:not(:focus)]:bg-bg-weak',
+            'hover:not-focus:bg-bg-weak',
             !hasError && [
               // hover
-              'hover:[&:not(:focus)]:ring-transparent',
+              'hover:not-focus:ring-transparent',
               // focus
-              'focus:shadow-button-important-focus focus:ring-stroke-strong',
+              'focus:border-stroke-soft focus:ring-stroke-soft/50 focus:ring-[3px]',
             ],
             hasError && [
               // base
               'ring-error-base',
               // focus
-              'focus:shadow-button-error-focus focus:ring-error-base',
+              'focus:border-destructive focus:ring-destructive/20 dark:focus:ring-destructive/40',
             ],
             disabled && ['bg-bg-weak ring-transparent'],
+            // aria-invalid
+            'aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive',
           ],
           !disabled && [
             // placeholder
@@ -48,7 +50,7 @@ const Textarea = React.forwardRef<
             // hover placeholder
             'group-hover/textarea:placeholder:text-text-sub',
             // focus
-            'focus:outline-none',
+            'focus:outline-hidden',
             // focus placeholder
             'focus:placeholder:text-text-sub',
           ],
@@ -76,9 +78,10 @@ function ResizeHandle() {
     </div>
   );
 }
+
 ResizeHandle.displayName = TEXTAREA_RESIZE_HANDLE_NAME;
 
-type TextareaProps = React.TextareaHTMLAttributes<HTMLTextAreaElement> &
+export type TextareaProps = React.TextareaHTMLAttributes<HTMLTextAreaElement> &
   (
     | {
         simple: true;
@@ -86,6 +89,7 @@ type TextareaProps = React.TextareaHTMLAttributes<HTMLTextAreaElement> &
         containerClassName?: never;
         hasError?: boolean;
         showCounter?: boolean | React.ReactNode;
+        resize?: boolean;
       }
     | {
         simple?: false;
@@ -93,11 +97,15 @@ type TextareaProps = React.TextareaHTMLAttributes<HTMLTextAreaElement> &
         containerClassName?: string;
         hasError?: boolean;
         showCounter?: boolean | React.ReactNode;
+        resize?: boolean;
       }
   );
 
 const TextareaRoot = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
-  ({ containerClassName, children, hasError, showCounter, maxLength, simple, ...rest }, forwardedRef) => {
+  (
+    { containerClassName, children, hasError, showCounter, maxLength, simple, resize = true, ...rest },
+    forwardedRef
+  ) => {
     if (simple) {
       return <Textarea ref={forwardedRef} simple hasError={hasError} {...rest} />;
     }
@@ -107,36 +115,38 @@ const TextareaRoot = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
         className={cn(
           [
             // base
-            'group/textarea bg-bg-white shadow-regular-xs relative flex w-full flex-col rounded-xl pb-2.5',
+            'group/textarea bg-bg-white shadow-regular-xs relative flex w-full flex-col rounded-md pb-2.5',
             'ring-stroke-soft ring-1 ring-inset',
             'transition duration-200 ease-out',
             // hover
-            'hover:[&:not(:focus-within)]:bg-bg-weak',
+            'hover:not-focus-within:bg-bg-weak',
             // disabled
             'has-[[disabled]]:bg-bg-weak has-[[disabled]]:pointer-events-none has-[[disabled]]:ring-transparent',
+            // aria-invalid
+            'aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive',
           ],
           !hasError && [
             // focus
-            'focus-within:shadow-button-important-focus focus-within:ring-stroke-strong',
+            'focus-within:border-stroke-soft focus-within:ring-stroke-soft/50 focus-within:ring-[3px]',
           ],
           hasError && [
             // base
             'ring-error-base',
             // focus
-            'focus-within:shadow-button-error-focus focus-within:ring-error-base',
+            'focus-within:border-destructive focus-within:ring-destructive/20 dark:focus-within:ring-destructive/40',
           ],
           containerClassName
         )}
       >
         <div className="grid">
           <div className="pointer-events-none relative z-10 flex flex-col gap-2 [grid-area:1/1]">
-            <Textarea ref={forwardedRef} hasError={hasError} {...rest} />
+            <Textarea ref={forwardedRef} hasError={hasError} maxLength={maxLength} {...rest} />
             <div className="pointer-events-none flex items-center justify-end gap-1.5 pl-3 pr-2.5">
               {showCounter && <CharCounter current={(rest.value as string)?.length ?? 0} max={maxLength} />}
-              <ResizeHandle />
+              {resize && <ResizeHandle />}
             </div>
           </div>
-          <div className="min-h-full resize-y overflow-hidden opacity-0 [grid-area:1/1]" />
+          {resize && <div className="min-h-full resize-y overflow-hidden opacity-0 [grid-area:1/1]" />}
         </div>
       </div>
     );
@@ -172,6 +182,7 @@ function CharCounter({
     </span>
   );
 }
+
 CharCounter.displayName = TEXTAREA_COUNTER_NAME;
 
-export { TextareaRoot as Textarea, CharCounter as TextareaCounter };
+export { TextareaRoot as Textarea };

@@ -1,11 +1,11 @@
-import type { WorkflowPreferencesPartial } from '../shared';
 import { ActionStepEnum, ChannelStepEnum } from '../constants';
-import type { JsonSchema, Schema } from './schema.types';
-import type { StepOptions } from './step.types';
-import type { Execute } from './workflow.types';
-import type { Awaitable, Prettify } from './util.types';
+import type { WorkflowPreferencesPartial } from '../shared';
 import type { EventTriggerParams, EventTriggerResult } from './event.types';
 import type { WithPassthrough } from './provider.types';
+import type { JsonSchema, Schema } from './schema.types';
+import type { StepOptions } from './step.types';
+import type { Awaitable, Prettify } from './util.types';
+import type { Execute, SeverityLevelEnum } from './workflow.types';
 
 export type StepType = `${ChannelStepEnum | ActionStepEnum}`;
 
@@ -59,10 +59,15 @@ export type DiscoverWorkflowOutput = {
     schema: JsonSchema;
     unknownSchema: Schema;
   };
+  env: {
+    schema: JsonSchema;
+    unknownSchema: Schema;
+  };
   preferences: WorkflowPreferencesPartial;
   tags: string[];
   name?: string;
   description?: string;
+  severity: SeverityLevelEnum;
 };
 
 /**
@@ -94,6 +99,11 @@ export type Workflow<T_Payload = never> = {
   discover: () => Promise<DiscoverWorkflowOutput>;
 };
 
+export type DiscoverAgentOutput = {
+  agentId: string;
+};
+
 export type DiscoverOutput = {
   workflows: Array<DiscoverWorkflowOutput>;
+  agents: Array<DiscoverAgentOutput>;
 };

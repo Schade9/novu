@@ -1,5 +1,5 @@
-import { useCallback, useRef, useState } from 'react';
 import * as Sentry from '@sentry/react';
+import { useCallback, useRef, useState } from 'react';
 
 type CallbackFunction = () => Promise<unknown>;
 
@@ -31,6 +31,7 @@ export function useInvocationQueue<T extends CallbackFunction = CallbackFunction
 
       await safelyRunInvocation(nextInvocation); // Execute the next autosave function
     }
+
     if (queueRef.current.length === 0) {
       setHasPendingItems(false);
     }

@@ -3,6 +3,9 @@ import type { JsonSchema } from '../../../types/schema.types';
 export const digestRegularOutputSchema = {
   type: 'object',
   properties: {
+    type: {
+      enum: ['regular'],
+    },
     amount: { type: 'number' },
     unit: {
       type: 'string',
@@ -23,6 +26,7 @@ export const digestRegularOutputSchema = {
       required: ['amount', 'unit'],
       additionalProperties: false,
     },
+    extendToSchedule: { type: 'boolean' },
   },
   required: ['amount', 'unit'],
   additionalProperties: false,
@@ -31,10 +35,14 @@ export const digestRegularOutputSchema = {
 export const digestTimedOutputSchema = {
   type: 'object',
   properties: {
+    type: {
+      enum: ['timed'],
+    },
     cron: { type: 'string' },
     digestKey: {
       type: 'string',
     },
+    extendToSchedule: { type: 'boolean' },
   },
   required: ['cron'],
   additionalProperties: false,
@@ -47,6 +55,7 @@ export const digestOutputSchema = {
 export const digestResultSchema = {
   type: 'object',
   properties: {
+    eventCount: { type: 'number' },
     events: {
       type: 'array',
       items: {

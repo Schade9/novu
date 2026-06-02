@@ -1,19 +1,19 @@
-import { expect } from 'chai';
-import { MessageRepository, NotificationRepository, NotificationTemplateEntity, SubscriberEntity } from '@novu/dal';
-import { SubscribersService, UserSession } from '@novu/testing';
-import { ChannelTypeEnum, StepTypeEnum } from '@novu/shared';
 import { Novu } from '@novu/api';
+import { NovuCore } from '@novu/api/core';
 import { triggerBulk } from '@novu/api/funcs/triggerBulk';
 import { TriggerEventRequestDto } from '@novu/api/models/components';
+import { MessageRepository, NotificationRepository, NotificationTemplateEntity, SubscriberEntity } from '@novu/dal';
+import { ChannelTypeEnum, StepTypeEnum } from '@novu/shared';
+import { SubscribersService, UserSession } from '@novu/testing';
+import { expect } from 'chai';
 import { z } from 'zod';
-import { NovuCore } from '@novu/api/core';
 import {
   expectSdkValidationExceptionGeneric,
   initNovuClassSdk,
   initNovuFunctionSdk,
 } from '../../shared/helpers/e2e/sdk/e2e-sdk.helper';
 
-describe('Trigger bulk events - /v1/events/trigger/bulk (POST) #novu-v2', function () {
+describe('Trigger bulk events - /v1/events/trigger/bulk (POST) #novu-v2', () => {
   let session: UserSession;
   let template: NotificationTemplateEntity;
   let secondTemplate: NotificationTemplateEntity;
@@ -44,12 +44,12 @@ describe('Trigger bulk events - /v1/events/trigger/bulk (POST) #novu-v2', functi
     novuCore = initNovuFunctionSdk(session);
   });
 
-  it('should return the response array in correct order', async function () {
+  it('should return the response array in correct order', async () => {
     const bulkTriggerResponse = await triggerBulk(novuCore, {
       events: [
         {
           transactionId: '1111',
-          name: template.triggers[0].identifier,
+          workflowId: template.triggers[0].identifier,
           to: [subscriber.subscriberId],
           payload: {
             firstName: 'Testing of User Name',
@@ -58,7 +58,7 @@ describe('Trigger bulk events - /v1/events/trigger/bulk (POST) #novu-v2', functi
         },
         {
           transactionId: '2222',
-          name: template.triggers[0].identifier,
+          workflowId: template.triggers[0].identifier,
           to: [subscriber.subscriberId],
           payload: {
             firstName: 'Testing of User Name',
@@ -67,7 +67,7 @@ describe('Trigger bulk events - /v1/events/trigger/bulk (POST) #novu-v2', functi
         },
         {
           transactionId: '3333',
-          name: template.triggers[0].identifier,
+          workflowId: template.triggers[0].identifier,
           to: [subscriber.subscriberId],
           payload: {
             firstName: 'Testing of User Name',
@@ -99,11 +99,11 @@ describe('Trigger bulk events - /v1/events/trigger/bulk (POST) #novu-v2', functi
     expect(thirdEvent.transactionId).to.equal('3333');
   });
 
-  it('should generate message and notification based on a bulk event', async function () {
+  it('should generate message and notification based on a bulk event', async () => {
     await novuClient.triggerBulk({
       events: [
         {
-          name: template.triggers[0].identifier,
+          workflowId: template.triggers[0].identifier,
           to: [
             {
               subscriberId: subscriber.subscriberId,
@@ -115,7 +115,7 @@ describe('Trigger bulk events - /v1/events/trigger/bulk (POST) #novu-v2', functi
           },
         },
         {
-          name: secondTemplate.triggers[0].identifier,
+          workflowId: secondTemplate.triggers[0].identifier,
           to: [
             {
               subscriberId: secondSubscriber.subscriberId,
@@ -128,8 +128,8 @@ describe('Trigger bulk events - /v1/events/trigger/bulk (POST) #novu-v2', functi
       ],
     });
 
-    await session.awaitRunningJobs(template._id);
-    await session.awaitRunningJobs(secondTemplate._id);
+    await session.waitForJobCompletion(template._id);
+    await session.waitForJobCompletion(secondTemplate._id);
 
     const notifications = await notificationRepository.findBySubscriberId(session.environment._id, subscriber._id);
     expect(notifications.length).to.equal(1);
@@ -199,10 +199,10 @@ describe('Trigger bulk events - /v1/events/trigger/bulk (POST) #novu-v2', functi
     expect(secondSubscriberNotification._templateId).to.equal(secondTemplate._id);
   });
 
-  it('should throw an error when sending more than 100 events', async function () {
+  it('should throw an error when sending more than 100 events', async () => {
     const event: TriggerEventRequestDto = {
       transactionId: '2222',
-      name: template.triggers[0].identifier,
+      workflowId: template.triggers[0].identifier,
       to: [subscriber.subscriberId],
       payload: {
         firstName: 'Testing of User Name',
@@ -220,12 +220,12 @@ describe('Trigger bulk events - /v1/events/trigger/bulk (POST) #novu-v2', functi
     expect(errorDto?.errors.events.messages[0]).to.equal('events must contain no more than 100 elements');
   });
 
-  it('should handle bulk if one of the events returns errors', async function () {
+  it('should handle bulk if one of the events returns errors', async () => {
     const bulkTriggerResponse = await triggerBulk(novuCore, {
       events: [
         {
           transactionId: '1111',
-          name: 'non-existing-trigger',
+          workflowId: 'non-existing-trigger',
           to: [subscriber.subscriberId],
           payload: {
             firstName: 'Testing of User Name',
@@ -234,7 +234,7 @@ describe('Trigger bulk events - /v1/events/trigger/bulk (POST) #novu-v2', functi
         },
         {
           transactionId: '2222',
-          name: template.triggers[0].identifier,
+          workflowId: template.triggers[0].identifier,
           to: [subscriber.subscriberId],
           payload: {
             firstName: 'Testing of User Name',
@@ -247,7 +247,7 @@ describe('Trigger bulk events - /v1/events/trigger/bulk (POST) #novu-v2', functi
             firstName: 'Testing of User Name',
             name: '',
           },
-          name: '',
+          workflowId: '',
           to: [],
         },
       ],

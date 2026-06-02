@@ -5,14 +5,13 @@ import { NovuError } from './utils/errors';
 
 interface CallQueueItem {
   fn: () => Promise<unknown>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   resolve: (value: any | PromiseLike<any>) => void;
   reject: (reason?: unknown) => void;
 }
 
 export class BaseModule {
-  protected _inboxService: InboxService;
-  protected _emitter: NovuEventEmitter;
+  _inboxService: InboxService;
+  _emitter: NovuEventEmitter;
   #callsQueue: CallQueueItem[] = [];
   #sessionError: unknown;
 

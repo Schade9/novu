@@ -1,9 +1,11 @@
 import { ChatProviderIdEnum } from '@novu/shared';
 import {
   ChannelTypeEnum,
-  ISendMessageSuccessResponse,
+  ENDPOINT_TYPES,
   IChatOptions,
   IChatProvider,
+  ISendMessageSuccessResponse,
+  isChannelDataOfType,
 } from '@novu/stateless';
 import axios from 'axios';
 import { BaseProvider, CasingEnum } from '../../../base.provider';
@@ -22,13 +24,19 @@ export class ZulipProvider extends BaseProvider implements IChatProvider {
 
   async sendMessage(
     data: IChatOptions,
-    bridgeProviderData: WithPassthrough<Record<string, unknown>> = {},
+    bridgeProviderData: WithPassthrough<Record<string, unknown>> = {}
   ): Promise<ISendMessageSuccessResponse> {
+    if (!isChannelDataOfType(data.channelData, ENDPOINT_TYPES.WEBHOOK)) {
+      throw new Error('Invalid channel data for Zulip provider');
+    }
+
+    const { channelData } = data;
+
     await this.axiosInstance.post(
-      data.webhookUrl,
+      channelData.endpoint.url,
       this.transform(bridgeProviderData, {
         text: data.content,
-      }).body,
+      }).body
     );
 
     return {

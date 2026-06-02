@@ -1,9 +1,10 @@
-import { ChatProviderIdEnum } from '@novu/shared';
+import { ChatProviderIdEnum, ENDPOINT_TYPES } from '@novu/shared';
 import {
   ChannelTypeEnum,
   IChatOptions,
   IChatProvider,
   ISendMessageSuccessResponse,
+  isChannelDataOfType,
 } from '@novu/stateless';
 import Axios, { AxiosInstance } from 'axios';
 import { BaseProvider, CasingEnum } from '../../../base.provider';
@@ -11,22 +12,19 @@ import { WithPassthrough } from '../../../utils/types';
 import { WhatsAppMessageTypeEnum } from './consts/whatsapp-business.enum';
 import { ISendMessageRes } from './types/whatsapp-business.types';
 
-export class WhatsappBusinessChatProvider
-  extends BaseProvider
-  implements IChatProvider
-{
+export class WhatsappBusinessChatProvider extends BaseProvider implements IChatProvider {
   id = ChatProviderIdEnum.WhatsAppBusiness;
   protected casing: CasingEnum = CasingEnum.SNAKE_CASE;
   channelType = ChannelTypeEnum.CHAT as ChannelTypeEnum.CHAT;
 
   private readonly axiosClient: AxiosInstance;
-  private readonly baseUrl = 'https://graph.facebook.com/v18.0/';
+  private readonly baseUrl = 'https://graph.facebook.com/v22.0/';
 
   constructor(
     private config: {
       accessToken: string;
       phoneNumberIdentification: string;
-    },
+    }
   ) {
     super();
     this.axiosClient = Axios.create({
@@ -39,16 +37,19 @@ export class WhatsappBusinessChatProvider
 
   async sendMessage(
     options: IChatOptions,
-    bridgeProviderData: WithPassthrough<Record<string, unknown>> = {},
+    bridgeProviderData: WithPassthrough<Record<string, unknown>> = {}
   ): Promise<ISendMessageSuccessResponse> {
-    const payload = this.transform(
-      bridgeProviderData,
-      this.defineMessagePayload(options),
-    ).body;
+    if (!isChannelDataOfType(options.channelData, ENDPOINT_TYPES.PHONE)) {
+      throw new Error('Invalid channel data for WhatsappBusiness provider');
+    }
+
+    const { phoneNumber } = options.channelData.endpoint;
+
+    const payload = this.transform(bridgeProviderData, this.defineMessagePayload(options, phoneNumber)).body;
 
     const { data } = await this.axiosClient.post<ISendMessageRes>(
       `${this.baseUrl + this.config.phoneNumberIdentification}/messages`,
-      payload,
+      payload
     );
 
     return {
@@ -57,32 +58,59 @@ export class WhatsappBusinessChatProvider
     };
   }
 
-  private defineMessagePayload(options: IChatOptions) {
+  private defineMessagePayload(options: IChatOptions, phoneNumber: string) {
     const type = this.defineMessageType(options);
 
     const basePayload = {
       messaging_product: 'whatsapp',
       recipient_type: 'individual',
-      to: options.phoneNumber,
+      to: phoneNumber,
       type,
     };
 
-    if (type === WhatsAppMessageTypeEnum.TEMPLATE) {
-      const templateData = options.customData?.template;
+    // Handle TEXT messages separately (since it's not in `customData`)
+    if (type === WhatsAppMessageTypeEnum.TEXT) {
+      const textData = options.customData?.text;
 
-      return { ...basePayload, template: templateData };
+      return {
+        ...basePayload,
+        text: {
+          body: textData?.body ?? options.content,
+          preview_url: textData?.preview_url ?? false,
+        },
+      };
     }
+
+    // For all other types, get data from customData
+    const payloadData = options.customData?.[type];
 
     return {
       ...basePayload,
-      text: { body: options.content, preview_url: false },
+      [type]: payloadData,
     };
   }
 
   private defineMessageType(options: IChatOptions): WhatsAppMessageTypeEnum {
-    return options.customData &&
-      Object.keys(options.customData).some((key) => key === 'template')
-      ? WhatsAppMessageTypeEnum.TEMPLATE
-      : WhatsAppMessageTypeEnum.TEXT;
+    const typeKeys: Record<string, WhatsAppMessageTypeEnum> = {
+      template: WhatsAppMessageTypeEnum.TEMPLATE,
+      interactive: WhatsAppMessageTypeEnum.INTERACTIVE,
+      image: WhatsAppMessageTypeEnum.IMAGE,
+      document: WhatsAppMessageTypeEnum.DOCUMENT,
+      video: WhatsAppMessageTypeEnum.VIDEO,
+      audio: WhatsAppMessageTypeEnum.AUDIO,
+      location: WhatsAppMessageTypeEnum.LOCATION,
+      contacts: WhatsAppMessageTypeEnum.CONTACTS,
+      sticker: WhatsAppMessageTypeEnum.STICKER,
+    };
+
+    if (options.customData) {
+      for (const key of Object.keys(typeKeys)) {
+        if (key in options.customData) {
+          return typeKeys[key];
+        }
+      }
+    }
+
+    return WhatsAppMessageTypeEnum.TEXT;
   }
 }

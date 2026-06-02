@@ -1,12 +1,6 @@
-import {
-  IsDefined,
-  IsOptional,
-  IsString,
-  ValidateNested,
-} from 'class-validator';
-
 import { NotificationTemplateEntity, SubscriberEntity } from '@novu/dal';
 import { ITenantDefine } from '@novu/shared';
+import { IsArray, IsDefined, IsOptional, IsString, ValidateNested } from 'class-validator';
 
 import { TriggerEventMulticastCommand } from '../trigger-event';
 
@@ -20,7 +14,7 @@ export class TriggerMulticastCommand extends TriggerEventMulticastCommand {
   @ValidateNested()
   tenant: ITenantDefine | null;
 
-  @IsDefined()
-  @IsString()
-  environmentName: string;
+  @IsArray()
+  @IsString({ each: true })
+  contextKeys: string[];
 }

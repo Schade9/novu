@@ -1,10 +1,10 @@
-import jwt from 'jsonwebtoken';
-import { expect } from 'chai';
 import { OrganizationEntity } from '@novu/dal';
-import { UserSession } from '@novu/testing';
 import { MemberRoleEnum, UserSessionData } from '@novu/shared';
+import { UserSession } from '@novu/testing';
+import { expect } from 'chai';
+import jwt from 'jsonwebtoken';
 
-describe('Switch Organization - /auth/organizations/:id/switch (POST) #novu-v1-os', async () => {
+describe('Switch Organization - /auth/organizations/:id/switch (POST) #novu-v0-os', async () => {
   let session: UserSession;
 
   describe('no organization for user', () => {
@@ -43,7 +43,7 @@ describe('Switch Organization - /auth/organizations/:id/switch (POST) #novu-v1-o
       expect(newJwt._id).to.equal(session.user._id);
       expect(newJwt.organizationId).to.equal(organization._id);
       expect(newJwt.roles.length).to.equal(1);
-      expect(newJwt.roles[0]).to.equal(MemberRoleEnum.ADMIN);
+      expect(newJwt.roles[0]).to.equal(MemberRoleEnum.OSS_ADMIN);
     });
   });
 

@@ -1,11 +1,19 @@
-import { type Options, defineConfig } from 'tsup';
+import { defineConfig, type Options } from 'tsup';
 import { version } from './package.json';
 import { type SupportedFrameworkName } from './src/internal';
 
 const frameworks: SupportedFrameworkName[] = ['h3', 'express', 'next', 'nuxt', 'sveltekit', 'remix', 'lambda', 'nest'];
 
 const baseConfig: Options = {
-  entry: ['src/index.ts', 'src/internal/index.ts', ...frameworks.map((framework) => `src/servers/${framework}.ts`)],
+  entry: [
+    'src/index.ts',
+    'src/jsx-runtime.ts',
+    'src/jsx-dev-runtime.ts',
+    'src/internal/index.ts',
+    'src/step-resolver.ts',
+    'src/validators.ts',
+    ...frameworks.map((framework) => `src/servers/${framework}.ts`),
+  ],
   sourcemap: false,
   clean: true,
   dts: true,
@@ -13,21 +21,23 @@ const baseConfig: Options = {
   minifyWhitespace: true,
   minifyIdentifiers: true,
   minifySyntax: true,
+  noExternal: ['chat'],
   define: {
     SDK_VERSION: `"${version}"`,
     FRAMEWORK_VERSION: `"2024-06-26"`,
   },
 };
 
-export default defineConfig([
-  {
-    ...baseConfig,
-    format: 'cjs',
-    outDir: 'dist/cjs',
-  },
-  {
-    ...baseConfig,
-    format: 'esm',
-    outDir: 'dist/esm',
-  },
-]);
+export const cjsConfig: Options = {
+  ...baseConfig,
+  format: 'cjs',
+  outDir: 'dist/cjs',
+};
+
+export const esmConfig: Options = {
+  ...baseConfig,
+  format: 'esm',
+  outDir: 'dist/esm',
+};
+
+export default defineConfig([cjsConfig, esmConfig]);

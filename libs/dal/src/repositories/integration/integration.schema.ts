@@ -19,6 +19,7 @@ const integrationSchema = new Schema<IntegrationDBModel>(
     providerId: Schema.Types.String,
     channel: Schema.Types.String,
     credentials: {
+      apiVersion: Schema.Types.String,
       apiKey: Schema.Types.String,
       user: Schema.Types.String,
       secretKey: Schema.Types.String,
@@ -61,6 +62,34 @@ const integrationSchema = new Schema<IntegrationDBModel>(
       channelId: Schema.Types.String,
       phoneNumberIdentification: Schema.Types.String,
       accessKey: Schema.Types.String,
+      appSid: Schema.Types.String,
+      senderId: Schema.Types.String,
+      servicePlanId: Schema.Types.String,
+      tenantId: Schema.Types.String,
+      signingSecret: Schema.Types.String,
+      outboundIntegrationId: Schema.Types.String,
+      useFromAddressOverride: Schema.Types.Boolean,
+      fromAddressOverride: Schema.Types.String,
+      AppIOBaseUrl: Schema.Types.String,
+      AppIOSubscriptionId: Schema.Types.String,
+      AppIOBearerToken: Schema.Types.String,
+      AppIOOriginalSignature: Schema.Types.String,
+    },
+    configurations: {
+      inboundWebhookEnabled: Schema.Types.Boolean,
+      inboundWebhookSigningKey: Schema.Types.String,
+      configurationSetName: Schema.Types.String,
+      inboxCount: Schema.Types.String,
+    },
+    provisioning: {
+      status: {
+        type: Schema.Types.String,
+        enum: ['pending', 'ready', 'failed'],
+      },
+      startedAt: Schema.Types.String,
+      completedAt: Schema.Types.String,
+      errorMessage: Schema.Types.String,
+      teamsAppCatalogId: Schema.Types.String,
     },
     active: {
       type: Schema.Types.Boolean,
@@ -76,7 +105,6 @@ const integrationSchema = new Schema<IntegrationDBModel>(
       type: Schema.Types.Boolean,
       default: false,
     },
-    removeNovuBranding: Schema.Types.Boolean,
     conditions: [
       {
         isNegated: Schema.Types.Boolean,
@@ -95,6 +123,11 @@ const integrationSchema = new Schema<IntegrationDBModel>(
       },
     ],
     connected: Schema.Types.Boolean,
+    _parentId: {
+      type: Schema.Types.ObjectId,
+      required: false,
+      default: null,
+    },
   },
   schemaOptions
 );

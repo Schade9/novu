@@ -1,11 +1,6 @@
-import {
-  ChannelTypeEnum,
-  ISendMessageSuccessResponse,
-  ISmsOptions,
-  ISmsProvider,
-} from '@novu/stateless';
-import axios, { AxiosInstance } from 'axios';
 import { SmsProviderIdEnum } from '@novu/shared';
+import { ChannelTypeEnum, ISendMessageSuccessResponse, ISmsOptions, ISmsProvider } from '@novu/stateless';
+import axios, { AxiosInstance } from 'axios';
 import { BaseProvider, CasingEnum } from '../../../base.provider';
 import { WithPassthrough } from '../../../utils/types';
 
@@ -23,7 +18,7 @@ export class MobishastraProvider extends BaseProvider implements ISmsProvider {
       password: string;
       language?: string;
       from: string;
-    },
+    }
   ) {
     super();
     this.axiosInstance = axios.create({
@@ -36,7 +31,7 @@ export class MobishastraProvider extends BaseProvider implements ISmsProvider {
 
   async sendMessage(
     options: ISmsOptions,
-    bridgeProviderData: WithPassthrough<Record<string, unknown>> = {},
+    bridgeProviderData: WithPassthrough<Record<string, unknown>> = {}
   ): Promise<ISendMessageSuccessResponse> {
     const transformedData = this.transform(bridgeProviderData, {
       Sender: options.from || this.config.from,
@@ -55,8 +50,7 @@ export class MobishastraProvider extends BaseProvider implements ISmsProvider {
     const messageId = responseData?.msg_id?.trim();
 
     if (!messageId) {
-      const errorMessage =
-        responseData?.str_response || 'Failed to send message';
+      const errorMessage = responseData?.str_response || 'Failed to send message';
       throw new Error(errorMessage);
     }
 

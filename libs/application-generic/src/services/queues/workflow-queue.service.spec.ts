@@ -1,17 +1,49 @@
 import { Test } from '@nestjs/testing';
-
-import { WorkflowQueueService } from './workflow-queue.service';
-import { BullMqService } from '../bull-mq';
-import { WorkflowInMemoryProviderService } from '../in-memory-provider';
+import { CommunityOrganizationRepository } from '@novu/dal';
 import { IWorkflowDataDto } from '../../dtos';
+import { PinoLogger } from '../../logging';
+import { BullMqService } from '../bull-mq';
+import { FeatureFlagsService } from '../feature-flags';
+import { WorkflowInMemoryProviderService } from '../in-memory-provider';
+import { SqsService } from '../sqs';
+import { WorkflowQueueService } from './workflow-queue.service';
 
 let workflowQueueService: WorkflowQueueService;
+
+const mockSqsService = {
+  getQueueUrl: jest.fn(() => undefined),
+  getProducer: jest.fn(() => undefined),
+  getClient: jest.fn(() => ({})),
+  isConfigured: jest.fn(() => false),
+  send: jest.fn(),
+  sendBulk: jest.fn(),
+} as unknown as SqsService;
+
+const mockFeatureFlagsService = {
+  getFlag: jest.fn(),
+} as unknown as FeatureFlagsService;
+
+const mockOrganizationRepository = {
+  findOne: jest.fn(),
+} as unknown as CommunityOrganizationRepository;
+
+const mockLogger = {
+  setContext: jest.fn(),
+  debug: jest.fn(),
+  info: jest.fn(),
+  warn: jest.fn(),
+  error: jest.fn(),
+} as unknown as PinoLogger;
 
 describe('Workflow Queue service', () => {
   describe('General', () => {
     beforeAll(async () => {
       workflowQueueService = new WorkflowQueueService(
         new WorkflowInMemoryProviderService(),
+        mockSqsService,
+        mockFeatureFlagsService,
+        mockOrganizationRepository,
+        mockLogger
       );
       await workflowQueueService.queue.obliterate();
     });
@@ -27,12 +59,7 @@ describe('Workflow Queue service', () => {
     it('should be initialised properly', async () => {
       expect(workflowQueueService).toBeDefined();
       expect(Object.keys(workflowQueueService)).toEqual(
-        expect.arrayContaining([
-          'topic',
-          'DEFAULT_ATTEMPTS',
-          'instance',
-          'queue',
-        ]),
+        expect.arrayContaining(['topic', 'DEFAULT_ATTEMPTS', 'instance', 'queue'])
       );
       expect(workflowQueueService.DEFAULT_ATTEMPTS).toEqual(3);
       expect(workflowQueueService.topic).toEqual('trigger-handler');
@@ -53,7 +80,7 @@ describe('Workflow Queue service', () => {
           jobsOpts: {
             removeOnComplete: true,
           },
-        }),
+        })
       );
       expect(workflowQueueService.queue.opts.prefix).toEqual('bull');
     });
@@ -88,7 +115,7 @@ describe('Workflow Queue service', () => {
           name: jobId,
           data: jobData,
           attemptsMade: 0,
-        }),
+        })
       );
     });
 
@@ -128,7 +155,7 @@ describe('Workflow Queue service', () => {
             _userId,
           },
           attemptsMade: 0,
-        }),
+        })
       );
     });
   });
@@ -139,6 +166,10 @@ describe('Workflow Queue service', () => {
 
       workflowQueueService = new WorkflowQueueService(
         new WorkflowInMemoryProviderService(),
+        mockSqsService,
+        mockFeatureFlagsService,
+        mockOrganizationRepository,
+        mockLogger
       );
       await workflowQueueService.queue.obliterate();
     });
@@ -149,9 +180,7 @@ describe('Workflow Queue service', () => {
     });
 
     it('should have prefix in cluster mode', async () => {
-      expect(workflowQueueService.queue.opts.prefix).toEqual(
-        '{trigger-handler}',
-      );
+      expect(workflowQueueService.queue.opts.prefix).toEqual('{trigger-handler}');
     });
   });
 });

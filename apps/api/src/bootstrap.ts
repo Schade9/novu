@@ -1,17 +1,25 @@
 import './instrument';
 
-import helmet from 'helmet';
-import { INestApplication, Logger, ValidationPipe, VersioningType } from '@nestjs/common';
-import { NestFactory, Reflector } from '@nestjs/core';
-import bodyParser from 'body-parser';
+import { INestApplication, ValidationPipe, VersioningType } from '@nestjs/common';
+import { NestFactory } from '@nestjs/core';
+import {
+  BullMqService,
+  getErrorInterceptor,
+  // biome-ignore lint/style/noRestrictedImports: <explanation> x
+  Logger,
+  PinoLogger,
+  RequestLogRepository,
+} from '@novu/application-generic';
 
-import { BullMqService, getErrorInterceptor, Logger as PinoLogger } from '@novu/application-generic';
-import { ExpressAdapter } from '@nestjs/platform-express';
-import { CONTEXT_PATH, corsOptionsDelegate, validateEnv } from './config';
-import { AppModule } from './app.module';
-import { setupSwagger } from './app/shared/framework/swagger/swagger.controller';
-import { SubscriberRouteGuard } from './app/auth/framework/subscriber-route.guard';
+import bodyParser from 'body-parser';
+import helmet from 'helmet';
 import { ResponseInterceptor } from './app/shared/framework/response.interceptor';
+import { setupSwagger } from './app/shared/framework/swagger/swagger.controller';
+
+import { RequestIdMiddleware } from './app/shared/middleware/request-id.middleware';
+
+import { AppModule } from './app.module';
+import { CONTEXT_PATH, corsOptionsDelegate, validateEnv } from './config';
 import { AllExceptionsFilter } from './exception-filter';
 
 const passport = require('passport');
@@ -24,36 +32,46 @@ const extendedBodySizeRoutes = [
   '/v1/layouts',
   '/v1/bridge/sync',
   '/v1/bridge/diff',
+  '/v1/environments/:environmentId/bridge',
+  '/v2/workflows',
 ];
 
-// Validate the ENV variables after launching SENTRY, so missing variables will report to sentry
+// Validate the ENV variables after launching SENTRY, so missing variables will report to sentry.
 validateEnv();
+class BootstrapOptions {
+  internalSdkGeneration?: boolean;
+}
 
-export async function bootstrap(expressApp?): Promise<INestApplication> {
+export async function bootstrap(
+  bootstrapOptions?: BootstrapOptions
+): Promise<{ app: INestApplication; document: any }> {
   BullMqService.haveProInstalled();
 
+  const agentRawBodyBuffer = (_req, _res, buffer, _encoding): void => {
+    if (buffer?.length) {
+      // eslint-disable-next-line no-param-reassign
+      (_req as any).rawBody = Buffer.from(buffer);
+    }
+  };
+
   let rawBodyBuffer: undefined | ((...args) => void);
-  let nestOptions: Record<string, boolean> = {};
+  /*
+   * Always disable NestJS's internal body-parser. The manual app.use(bodyParser.*)
+   * registrations below cover every route, so the internal parser is redundant.
+   *
+   * Keeping it on caused a latent double-parse: with @opentelemetry/instrumentation-express
+   * active, each body-parser layer is wrapped in AsyncLocalStorageContextManager.run().
+   * The internal parser would consume the request stream first; the manual parser then
+   * failed inside raw-body with `InternalServerError: stream is not readable`.
+   */
+  const nestOptions: Record<string, boolean> = { bodyParser: false };
 
   if (process.env.NOVU_ENTERPRISE === 'true' || process.env.CI_EE_TEST === 'true') {
-    rawBodyBuffer = (req, res, buffer, encoding): void => {
-      if (buffer && buffer.length) {
-        // eslint-disable-next-line no-param-reassign
-        req.rawBody = Buffer.from(buffer);
-      }
-    };
-    nestOptions = {
-      bodyParser: false,
-      rawBody: true,
-    };
+    rawBodyBuffer = agentRawBodyBuffer;
+    nestOptions.rawBody = true;
   }
 
-  let app: INestApplication;
-  if (expressApp) {
-    app = await NestFactory.create(AppModule, new ExpressAdapter(expressApp), nestOptions);
-  } else {
-    app = await NestFactory.create(AppModule, { bufferLogs: true, ...nestOptions });
-  }
+  const app = await NestFactory.create(AppModule, { bufferLogs: true, ...nestOptions });
 
   app.enableVersioning({
     type: VersioningType.URI,
@@ -61,20 +79,27 @@ export async function bootstrap(expressApp?): Promise<INestApplication> {
     defaultVersion: '1',
   });
 
-  app.useLogger(app.get(PinoLogger));
+  const logger = await app.resolve(PinoLogger);
+  logger.setContext('Bootstrap');
+
+  app.useLogger(app.get(Logger));
   app.flushLogs();
 
   const server = app.getHttpServer();
-  Logger.verbose(`Server timeout: ${server.timeout}`);
+  logger.trace(`Server timeout: ${server.timeout}`);
   server.keepAliveTimeout = 61 * 1000;
-  Logger.verbose(`Server keepAliveTimeout: ${server.keepAliveTimeout / 1000}s `);
+  logger.trace(`Server keepAliveTimeout: ${server.keepAliveTimeout / 1000}s `);
   server.headersTimeout = 65 * 1000;
-  Logger.verbose(`Server headersTimeout: ${server.headersTimeout / 1000}s `);
+  logger.trace(`Server headersTimeout: ${server.headersTimeout / 1000}s `);
 
   app.use(helmet());
   app.enableCors(corsOptionsDelegate);
 
   app.use(passport.initialize());
+
+  // Apply transaction ID middleware early in the request lifecycle
+  const transactionIdMiddleware = new RequestIdMiddleware();
+  app.use((req, res, next) => transactionIdMiddleware.use(req, res, next));
 
   app.useGlobalPipes(
     new ValidationPipe({
@@ -86,29 +111,72 @@ export async function bootstrap(expressApp?): Promise<INestApplication> {
   app.useGlobalInterceptors(new ResponseInterceptor());
   app.useGlobalInterceptors(getErrorInterceptor());
 
-  app.useGlobalGuards(new SubscriberRouteGuard(app.get(Reflector), app.get(PinoLogger)));
+  app.use(extendedBodySizeRoutes, bodyParser.json({ limit: '26mb' }));
+  app.use(extendedBodySizeRoutes, bodyParser.urlencoded({ limit: '26mb', extended: true }));
 
-  app.use(extendedBodySizeRoutes, bodyParser.json({ limit: '20mb' }));
-  app.use(extendedBodySizeRoutes, bodyParser.urlencoded({ limit: '20mb', extended: true }));
+  app.use('/v1/agents', bodyParser.json({ limit: '8mb', verify: agentRawBodyBuffer }));
 
-  app.use(bodyParser.json({ verify: rawBodyBuffer }));
-  app.use(bodyParser.urlencoded({ extended: true, verify: rawBodyBuffer }));
+  // Add text/plain parser specifically for inbound webhooks (SNS confirmations)
+  app.use(
+    '/v2/inbound-webhooks/delivery-providers/:environmentId/:integrationId',
+    bodyParser.text({ verify: rawBodyBuffer })
+  );
 
-  app.use(compression());
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/v1/better-auth')) {
+      return next();
+    }
 
-  await setupSwagger(app);
+    return bodyParser.json({ verify: rawBodyBuffer })(req, res, next);
+  });
 
-  app.useGlobalFilters(new AllExceptionsFilter(app.get(PinoLogger)));
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/v1/better-auth')) {
+      return next();
+    }
 
-  if (expressApp) {
-    await app.init();
-  } else {
-    await app.listen(process.env.PORT);
-  }
+    return bodyParser.urlencoded({ extended: true, verify: rawBodyBuffer })(req, res, next);
+  });
+
+  app.use(
+    compression({
+      filter: (req, res) => {
+        // the compression middleware buffers the response to compress it, which breaks SSE streaming
+        if (res.getHeader('Content-Type') === 'text/event-stream') {
+          return false;
+        }
+
+        return compression.filter(req, res);
+      },
+    })
+  );
+
+  const document = await setupSwagger(app, bootstrapOptions?.internalSdkGeneration);
+
+  app.useGlobalFilters(new AllExceptionsFilter(app.get(Logger), app.get(RequestLogRepository)));
+
+  /*
+   * Handle unhandled promise rejections
+   * We explicitly crash the process on unhandled rejections as they indicate the application
+   * is in an undefined state. NestJS can't handle these as they occur outside the event lifecycle.
+   * According to Node.js docs, it's unsafe to resume normal operation after unhandled rejections.
+   * We log these rejections with fatal level to ensure they are properly monitored and tracked.
+   * See: https://nodejs.org/api/process.html#process_warning_using_uncaughtexception_correctly
+   */
+  process.on('unhandledRejection', (reason, promise) => {
+    logger.fatal({
+      err: reason,
+      message: 'Unhandled promise rejection',
+      promise,
+    });
+    process.exit(1);
+  });
+
+  await app.listen(process.env.PORT || 3000);
 
   app.enableShutdownHooks();
 
-  Logger.log(`Started application in NODE_ENV=${process.env.NODE_ENV} on port ${process.env.PORT}`);
+  logger.info(`Started application in NODE_ENV=${process.env.NODE_ENV} on port ${process.env.PORT}.`);
 
-  return app;
+  return { app, document };
 }

@@ -1,7 +1,6 @@
 import { Injectable } from '@nestjs/common';
 
-import { ControlValuesEntity, ControlValuesRepository } from '@novu/dal';
-import { ControlValuesLevelEnum } from '@novu/shared';
+import { type ControlValuesEntity, ControlValuesRepository } from '@novu/dal';
 import { UpsertControlValuesCommand } from './upsert-control-values.command';
 
 @Injectable()
@@ -9,28 +8,26 @@ export class UpsertControlValuesUseCase {
   constructor(private controlValuesRepository: ControlValuesRepository) {}
 
   async execute(command: UpsertControlValuesCommand) {
-    const existingControlValues = await this.controlValuesRepository.findFirst({
+    const existingControlValues = await this.controlValuesRepository.findOne({
       _environmentId: command.environmentId,
       _organizationId: command.organizationId,
       _workflowId: command.workflowId,
-      _stepId: command.notificationStepEntity._templateId,
-      level: ControlValuesLevelEnum.STEP_CONTROLS,
+      _stepId: command.stepId,
+      _layoutId: command.layoutId,
+      level: command.level,
     });
 
     if (existingControlValues) {
-      return await this.updateControlValues(
-        existingControlValues,
-        command,
-        command.newControlValues,
-      );
+      return await this.updateControlValues(existingControlValues, command, command.newControlValues);
     }
 
     return await this.controlValuesRepository.create({
       _organizationId: command.organizationId,
       _environmentId: command.environmentId,
       _workflowId: command.workflowId,
-      _stepId: command.notificationStepEntity._templateId,
-      level: ControlValuesLevelEnum.STEP_CONTROLS,
+      _stepId: command.stepId,
+      _layoutId: command.layoutId,
+      level: command.level,
       priority: 0,
       controls: command.newControlValues,
     });
@@ -39,7 +36,7 @@ export class UpsertControlValuesUseCase {
   private async updateControlValues(
     found: ControlValuesEntity,
     command: UpsertControlValuesCommand,
-    controlValues: Record<string, unknown>,
+    controlValues: Record<string, unknown>
   ) {
     await this.controlValuesRepository.update(
       {
@@ -49,7 +46,7 @@ export class UpsertControlValuesUseCase {
       {
         priority: 0,
         controls: controlValues,
-      },
+      }
     );
 
     return this.controlValuesRepository.findOne({

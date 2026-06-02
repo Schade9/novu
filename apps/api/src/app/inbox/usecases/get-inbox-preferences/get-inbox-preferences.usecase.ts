@@ -1,13 +1,15 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { AnalyticsService, InstrumentUsecase } from '@novu/application-generic';
+import { SubscriberEntity, SubscriberRepository } from '@novu/dal';
+import { PreferenceLevelEnum, SeverityLevelEnum } from '@novu/shared';
 import {
-  AnalyticsService,
-  GetSubscriberPreference,
-  GetSubscriberPreferenceCommand,
   GetSubscriberGlobalPreference,
   GetSubscriberGlobalPreferenceCommand,
-  InstrumentUsecase,
-} from '@novu/application-generic';
-import { PreferenceLevelEnum } from '@novu/shared';
+} from '../../../subscribers/usecases/get-subscriber-global-preference';
+import {
+  GetSubscriberPreference,
+  GetSubscriberPreferenceCommand,
+} from '../../../subscribers/usecases/get-subscriber-preference';
 import { AnalyticsEventsEnum } from '../../utils';
 import { InboxPreference } from '../../utils/types';
 import { GetInboxPreferencesCommand } from './get-inbox-preferences.command';
@@ -17,17 +19,25 @@ export class GetInboxPreferences {
   constructor(
     private getSubscriberGlobalPreference: GetSubscriberGlobalPreference,
     private analyticsService: AnalyticsService,
-    private getSubscriberPreference: GetSubscriberPreference
+    private getSubscriberPreference: GetSubscriberPreference,
+    private subscriberRepository: SubscriberRepository
   ) {}
 
   @InstrumentUsecase()
   async execute(command: GetInboxPreferencesCommand): Promise<InboxPreference[]> {
+    const subscriber = await this.getSubscriber(command);
+    if (!subscriber) {
+      throw new NotFoundException(`Subscriber with id ${command.subscriberId} not found`);
+    }
+
     const globalPreference = await this.getSubscriberGlobalPreference.execute(
       GetSubscriberGlobalPreferenceCommand.create({
         organizationId: command.organizationId,
         environmentId: command.environmentId,
         subscriberId: command.subscriberId,
+        contextKeys: command.contextKeys,
         includeInactiveChannels: false,
+        subscriber,
       })
     );
 
@@ -36,13 +46,23 @@ export class GetInboxPreferences {
       ...globalPreference.preference,
     };
 
+    const severity = command.severity
+      ? Array.isArray(command.severity)
+        ? command.severity
+        : [command.severity]
+      : undefined;
+
     const subscriberWorkflowPreferences = await this.getSubscriberPreference.execute(
       GetSubscriberPreferenceCommand.create({
         environmentId: command.environmentId,
         subscriberId: command.subscriberId,
         organizationId: command.organizationId,
+        contextKeys: command.contextKeys,
         tags: command.tags,
+        severity,
+        subscriber,
         includeInactiveChannels: false,
+        criticality: command.criticality,
       })
     );
     const workflowPreferences = subscriberWorkflowPreferences.map((subscriberWorkflowPreference) => {
@@ -55,17 +75,41 @@ export class GetInboxPreferences {
           name: subscriberWorkflowPreference.template.name,
           critical: subscriberWorkflowPreference.template.critical,
           tags: subscriberWorkflowPreference.template.tags,
+          severity: subscriberWorkflowPreference.template.severity ?? SeverityLevelEnum.NONE,
         },
       } satisfies InboxPreference;
+    });
+
+    const sortedWorkflowPreferences = workflowPreferences.sort((a, b) => {
+      const aCreatedAt = subscriberWorkflowPreferences.find((preference) => preference.template._id === a.workflow?.id)
+        ?.template.createdAt;
+      const bCreatedAt = subscriberWorkflowPreferences.find((preference) => preference.template._id === b.workflow?.id)
+        ?.template.createdAt;
+
+      if (!aCreatedAt && !bCreatedAt) return 0;
+      if (!aCreatedAt) return 1;
+      if (!bCreatedAt) return -1;
+
+      return new Date(aCreatedAt).getTime() - new Date(bCreatedAt).getTime();
     });
 
     this.analyticsService.mixpanelTrack(AnalyticsEventsEnum.FETCH_PREFERENCES, '', {
       _organization: command.organizationId,
       subscriberId: command.subscriberId,
-      workflowSize: workflowPreferences.length,
+      workflowSize: sortedWorkflowPreferences.length,
       tags: command.tags || [],
     });
 
-    return [updatedGlobalPreference, ...workflowPreferences];
+    return [updatedGlobalPreference, ...sortedWorkflowPreferences];
+  }
+
+  private async getSubscriber(command: GetInboxPreferencesCommand): Promise<SubscriberEntity> {
+    const subscriber = await this.subscriberRepository.findBySubscriberId(command.environmentId, command.subscriberId);
+
+    if (!subscriber) {
+      throw new NotFoundException(`Subscriber ${command.subscriberId} not found`);
+    }
+
+    return subscriber;
   }
 }

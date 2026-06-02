@@ -1,8 +1,8 @@
-import { ChannelTypeEnum } from '../../types';
+import { SeverityLevelEnum } from '../../consts';
+import { ChannelTypeEnum, ISubscriber } from '../../types';
 import { IExecutionDetail } from '../execution-details';
 import { IJob as IJobBase } from '../job';
 import { INotificationTemplate } from '../notification-template';
-import { ISubscriber } from '../subscriber';
 
 export interface IActivityJob extends IJobBase {
   executionDetails: IExecutionDetail[];
@@ -15,6 +15,7 @@ export interface IActivity {
   _organizationId: string;
   _subscriberId: string;
   _digestedNotificationId?: string;
+  topics?: { _topicId: string; topicKey: string }[];
   transactionId: string;
   channels: ChannelTypeEnum[];
   to: {
@@ -24,7 +25,10 @@ export interface IActivity {
   tags: string[];
   createdAt: string;
   updatedAt: string;
-  template: Pick<INotificationTemplate, '_id' | 'name' | 'triggers'>;
-  subscriber: Pick<ISubscriber, '_id' | 'subscriberId' | 'firstName' | 'lastName'>;
+  template?: Pick<INotificationTemplate, '_id' | 'name' | 'triggers' | 'origin'>;
+  subscriber?: Pick<ISubscriber, '_id' | 'subscriberId' | 'firstName' | 'lastName'>;
   jobs: IActivityJob[];
+  severity?: SeverityLevelEnum;
+  critical?: boolean;
+  contextKeys?: string[];
 }

@@ -1,9 +1,5 @@
-import {
-  ChannelTypeEnum,
-  ICredentials,
-  PushProviderIdEnum,
-} from '@novu/shared';
 import { ExpoPushProvider } from '@novu/providers';
+import { ChannelTypeEnum, ICredentials, PushProviderIdEnum } from '@novu/shared';
 import { BasePushHandler } from './base.handler';
 
 export class ExpoHandler extends BasePushHandler {
@@ -19,5 +15,9 @@ export class ExpoHandler extends BasePushHandler {
     this.provider = new ExpoPushProvider({
       accessToken: credentials.apiKey,
     });
+  }
+
+  isTokenInvalid(errorMessage: string): boolean {
+    return this.provider.isTokenInvalid(errorMessage);
   }
 }

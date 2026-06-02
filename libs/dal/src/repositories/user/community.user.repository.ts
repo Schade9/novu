@@ -1,8 +1,8 @@
 import { createHash } from 'crypto';
 import { BaseRepository } from '../base-repository';
-import { IUserRepository } from './user-repository.interface';
-import { IUserResetTokenCount, UserEntity, UserDBModel } from './user.entity';
+import { IUserResetTokenCount, UserDBModel, UserEntity } from './user.entity';
 import { User } from './user.schema';
+import { IUserRepository } from './user-repository.interface';
 
 export class CommunityUserRepository
   extends BaseRepository<UserDBModel, UserEntity, object>
@@ -18,8 +18,12 @@ export class CommunityUserRepository
     });
   }
 
-  async findById(id: string, select?: string): Promise<UserEntity | null> {
-    const data = await this.MongooseModel.findById(id, select);
+  async findById(
+    id: string,
+    select?: string,
+    options?: { readPreference?: 'secondaryPreferred' | 'primary' }
+  ): Promise<UserEntity | null> {
+    const data = await this.MongooseModel.findById(id, select).read(options?.readPreference || 'primary');
     if (!data) return null;
 
     return this.mapEntity(data.toObject());

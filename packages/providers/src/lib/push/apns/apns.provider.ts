@@ -1,10 +1,5 @@
 import { PushProviderIdEnum } from '@novu/shared';
-import {
-  ChannelTypeEnum,
-  IPushOptions,
-  IPushProvider,
-  ISendMessageSuccessResponse,
-} from '@novu/stateless';
+import { ChannelTypeEnum, IPushOptions, IPushProvider, ISendMessageSuccessResponse } from '@novu/stateless';
 import apn from '@parse/node-apn';
 import { BaseProvider, CasingEnum } from '../../../base.provider';
 import { WithPassthrough } from '../../../utils/types';
@@ -14,7 +9,7 @@ export class APNSPushProvider extends BaseProvider implements IPushProvider {
   protected casing: CasingEnum = CasingEnum.CAMEL_CASE;
   channelType = ChannelTypeEnum.PUSH as ChannelTypeEnum.PUSH;
 
-  protected keyCaseObject: Record<string, string> = {
+  protected override keyCaseObject: Record<string, string> = {
     contentAvailable: 'content-available',
     launchImage: 'launch-image',
     mutableContent: 'mutable-content',
@@ -34,7 +29,7 @@ export class APNSPushProvider extends BaseProvider implements IPushProvider {
       teamId: string;
       bundleId: string;
       production: boolean;
-    },
+    }
   ) {
     super();
     this.config = config;
@@ -50,29 +45,31 @@ export class APNSPushProvider extends BaseProvider implements IPushProvider {
 
   async sendMessage(
     options: IPushOptions,
-    bridgeProviderData: WithPassthrough<Record<string, unknown>> = {},
+    bridgeProviderData: WithPassthrough<Record<string, unknown>> = {}
   ): Promise<ISendMessageSuccessResponse> {
-    // eslint-disable-next-line no-param-reassign
     delete (options.overrides as any)?.notificationIdentifiers;
-    const notification = new apn.Notification(
-      this.transform(bridgeProviderData, {
-        body: options.content,
-        title: options.title,
-        payload: options.payload,
-        topic: this.config.bundleId,
-        ...options.overrides,
-      }).body,
-    );
+    const transformedBody = this.transform(bridgeProviderData, {
+      body: options.content,
+      title: options.title,
+      payload: options.payload,
+      topic: this.config.bundleId,
+      ...options.overrides,
+    }).body as Record<string, unknown>;
+
+    const collapseId =
+      transformedBody.collapseId != null && transformedBody.collapseId !== ''
+        ? transformedBody.collapseId
+        : options.messageId;
+
+    const notification = new apn.Notification({
+      ...transformedBody,
+      ...(collapseId != null && collapseId !== '' ? { collapseId } : {}),
+    });
     const res = await this.provider.send(notification, options.target);
 
     if (res.failed.length > 0) {
       throw new Error(
-        res.failed
-          .map(
-            (failed) =>
-              `${failed.device} failed for reason: ${failed.response.reason}`,
-          )
-          .join(','),
+        res.failed.map((failed) => `${failed.device} failed for reason: ${failed.response.reason}`).join(',')
       );
     }
 

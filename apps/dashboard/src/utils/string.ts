@@ -24,3 +24,13 @@ export const formatJSONString = (raw: unknown): string => {
 
   return String(raw);
 };
+
+const PopularHTMLEntities = Object.freeze(['&', '<', '>']);
+
+export function containsHTMLEntities(value: string) {
+  if (!value) {
+    return false;
+  }
+
+  return PopularHTMLEntities.some((entity) => value.includes(entity));
+}

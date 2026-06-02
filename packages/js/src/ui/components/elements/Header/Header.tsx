@@ -1,4 +1,4 @@
-import { cn, useStyle } from '../../../helpers';
+import { useStyle } from '../../../helpers';
 import { StatusDropdown } from '../InboxStatus/InboxStatusDropdown';
 import { ActionsContainer } from './ActionsContainer';
 
@@ -11,10 +11,11 @@ export const Header = (props: HeaderProps) => {
 
   return (
     <div
-      class={style(
-        'inboxHeader',
-        cn('nt-flex nt-shrink-0 nt-justify-between nt-items-center nt-w-full nt-py-5 nt-px-6')
-      )}
+      class={style({
+        key: 'inboxHeader',
+        className:
+          'nt-flex nt-bg-neutral-alpha-25 nt-shrink-0 nt-justify-between nt-items-center nt-w-full nt-pb-2 nt-pt-2.5 nt-px-4',
+      })}
     >
       <StatusDropdown />
       <ActionsContainer showPreferences={props.navigateToPreferences} />

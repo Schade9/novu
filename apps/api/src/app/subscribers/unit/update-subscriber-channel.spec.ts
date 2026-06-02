@@ -1,15 +1,20 @@
-import { Test } from '@nestjs/testing';
-import { expect } from 'chai';
 import { faker } from '@faker-js/faker';
+import { Test } from '@nestjs/testing';
+import {
+  OAuthHandlerEnum,
+  SYSTEM_LIMITS,
+  UpdateSubscriberChannel,
+  UpdateSubscriberChannelCommand,
+} from '@novu/application-generic';
 
 import { IntegrationRepository, SubscriberRepository } from '@novu/dal';
-import { SubscribersService, UserSession } from '@novu/testing';
 import { ChannelTypeEnum, ChatProviderIdEnum, PushProviderIdEnum } from '@novu/shared';
-import { OAuthHandlerEnum, UpdateSubscriberChannel, UpdateSubscriberChannelCommand } from '@novu/application-generic';
+import { SubscribersService, UserSession } from '@novu/testing';
+import { expect } from 'chai';
 
 import { SharedModule } from '../../shared/shared.module';
 
-describe('Update Subscriber channel credentials', function () {
+describe('Update Subscriber channel credentials', () => {
   let updateSubscriberChannelUsecase: UpdateSubscriberChannel;
   let session: UserSession;
   const subscriberRepository = new SubscriberRepository();
@@ -27,7 +32,7 @@ describe('Update Subscriber channel credentials', function () {
     updateSubscriberChannelUsecase = moduleRef.get<UpdateSubscriberChannel>(UpdateSubscriberChannel);
   });
 
-  it('should add subscriber new discord channel credentials', async function () {
+  it('should add subscriber new discord channel credentials', async () => {
     const subscriberService = new SubscribersService(session.organization._id, session.environment._id);
     const subscriber = await subscriberService.createSubscriber();
 
@@ -59,7 +64,7 @@ describe('Update Subscriber channel credentials', function () {
     expect(newChannel?.credentials.webhookUrl).to.equal(subscriberChannel.credentials.webhookUrl);
   });
 
-  it('should update subscriber existing slack channel credentials', async function () {
+  it('should update subscriber existing slack channel credentials', async () => {
     const subscriberService = new SubscribersService(session.organization._id, session.environment._id);
     const subscriber = await subscriberService.createSubscriber();
 
@@ -103,7 +108,7 @@ describe('Update Subscriber channel credentials', function () {
     expect(updatedChannel?.credentials.webhookUrl).to.equal(newSlackSubscribersChannel.credentials.webhookUrl);
   });
 
-  it('should update only webhookUrl on existing slack channel credentials', async function () {
+  it('should update only webhookUrl on existing slack channel credentials', async () => {
     const subscriberService = new SubscribersService(session.organization._id, session.environment._id);
     const subscriber = await subscriberService.createSubscriber();
     const slackIntegration = await integrationRepository.findOne({
@@ -143,7 +148,7 @@ describe('Update Subscriber channel credentials', function () {
     expect(newChannel?.credentials.webhookUrl).to.equal('new-secret-webhookUrl');
   });
 
-  it('should update slack channel credentials for a specific integration', async function () {
+  it('should update slack channel credentials for a specific integration', async () => {
     const identifier = 'identifier_slack';
     const webhookUrl = 'webhookUrl';
     const integration = await integrationRepository.create({
@@ -183,7 +188,7 @@ describe('Update Subscriber channel credentials', function () {
     expect(updatedChannel?.credentials.webhookUrl).to.equal(webhookUrl);
   });
 
-  it('should not add duplicated token when the operation IS idempotent', async function () {
+  it('should not add duplicated token when the operation IS idempotent', async () => {
     const subscriberService = new SubscribersService(session.organization._id, session.environment._id);
     const subscriber = await subscriberService.createSubscriber();
 
@@ -218,7 +223,7 @@ describe('Update Subscriber channel credentials', function () {
     expect(addedFcmToken?.credentials?.deviceTokens).to.deep.equal(['token_1']);
   });
 
-  it('should not add duplicated token when the operation IS NOT idempotent', async function () {
+  it('should not add duplicated token when the operation IS NOT idempotent', async () => {
     const subscriberService = new SubscribersService(session.organization._id, session.environment._id);
     const subscriber = await subscriberService.createSubscriber();
 
@@ -253,7 +258,7 @@ describe('Update Subscriber channel credentials', function () {
     expect(addedFcmToken?.credentials?.deviceTokens).to.deep.equal(['identifier', 'token_1']);
   });
 
-  it('should append to existing device token array when the operation IS NOT idempotent', async function () {
+  it('should append to existing device token array when the operation IS NOT idempotent', async () => {
     const subscriberService = new SubscribersService(session.organization._id, session.environment._id);
     const subscriber = await subscriberService.createSubscriber();
 
@@ -288,7 +293,7 @@ describe('Update Subscriber channel credentials', function () {
     expect(addedFcmToken?.credentials?.deviceTokens).to.deep.equal(['identifier', 'token_1']);
   });
 
-  it('should update deviceTokens with empty array', async function () {
+  it('should update deviceTokens with empty array', async () => {
     const subscriberService = new SubscribersService(session.organization._id, session.environment._id);
     const subscriber = await subscriberService.createSubscriber();
 
@@ -346,7 +351,7 @@ describe('Update Subscriber channel credentials', function () {
     expect(updatedProviderWithEmptyDeviceToken?.credentials?.deviceTokens).to.deep.equal([]);
   });
 
-  it('should update deviceTokens with new token after stress adding', async function () {
+  it('should update deviceTokens with new token after stress adding', async () => {
     const subscriberService = new SubscribersService(session.organization._id, session.environment._id);
     const subscriber = await subscriberService.createSubscriber();
 
@@ -417,7 +422,7 @@ describe('Update Subscriber channel credentials', function () {
     expect(updateToken?.credentials?.deviceTokens).to.deep.equal(['token_555']);
   });
 
-  it('should update deviceTokens without duplication on channel creation (addChannelToSubscriber)', async function () {
+  it('should update deviceTokens without duplication on channel creation (addChannelToSubscriber)', async () => {
     const subscriberId = SubscriberRepository.createObjectId();
     const test = await subscriberRepository.create({
       firstName: faker.name.firstName(),
@@ -447,5 +452,96 @@ describe('Update Subscriber channel credentials', function () {
 
     expect(addedFcmToken?.credentials?.deviceTokens?.length).to.equal(1);
     expect(addedFcmToken?.credentials?.deviceTokens).to.deep.equal(['token_1']);
+  });
+
+  it('should reject device tokens exceeding the system limit when creating a new channel', async () => {
+    const subscriberService = new SubscribersService(session.organization._id, session.environment._id);
+    const subscriber = await subscriberService.createSubscriber();
+
+    const tokens = Array.from({ length: SYSTEM_LIMITS.SUBSCRIBER_DEVICE_TOKENS + 1 }, (_, i) => `token_${i}`);
+
+    try {
+      await updateSubscriberChannelUsecase.execute(
+        UpdateSubscriberChannelCommand.create({
+          organizationId: subscriber._organizationId,
+          subscriberId: subscriber.subscriberId,
+          environmentId: session.environment._id,
+          providerId: PushProviderIdEnum.FCM,
+          credentials: { deviceTokens: tokens },
+          oauthHandler: OAuthHandlerEnum.NOVU,
+          isIdempotentOperation: true,
+        })
+      );
+      expect.fail('Should have thrown BadRequestException');
+    } catch (error: any) {
+      expect(error.response.message).to.contain('Device tokens limit exceeded');
+      expect(error.response.limit).to.equal(SYSTEM_LIMITS.SUBSCRIBER_DEVICE_TOKENS);
+    }
+  });
+
+  it('should reject device tokens exceeding the system limit when appending to existing channel', async () => {
+    const subscriberService = new SubscribersService(session.organization._id, session.environment._id);
+    const subscriber = await subscriberService.createSubscriber();
+
+    const initialTokens = Array.from({ length: 50 }, (_, i) => `token_${i}`);
+    await updateSubscriberChannelUsecase.execute(
+      UpdateSubscriberChannelCommand.create({
+        organizationId: subscriber._organizationId,
+        subscriberId: subscriber.subscriberId,
+        environmentId: session.environment._id,
+        providerId: PushProviderIdEnum.FCM,
+        credentials: { deviceTokens: initialTokens },
+        oauthHandler: OAuthHandlerEnum.NOVU,
+        isIdempotentOperation: true,
+      })
+    );
+
+    const additionalTokens = Array.from({ length: 60 }, (_, i) => `new_token_${i}`);
+
+    try {
+      await updateSubscriberChannelUsecase.execute(
+        UpdateSubscriberChannelCommand.create({
+          organizationId: subscriber._organizationId,
+          subscriberId: subscriber.subscriberId,
+          environmentId: session.environment._id,
+          providerId: PushProviderIdEnum.FCM,
+          credentials: { deviceTokens: additionalTokens },
+          oauthHandler: OAuthHandlerEnum.NOVU,
+          isIdempotentOperation: false,
+        })
+      );
+      expect.fail('Should have thrown BadRequestException');
+    } catch (error: any) {
+      expect(error.response.message).to.contain('Device tokens limit exceeded');
+      expect(error.response.limit).to.equal(SYSTEM_LIMITS.SUBSCRIBER_DEVICE_TOKENS);
+    }
+  });
+
+  it('should allow device tokens at exactly the system limit', async () => {
+    const subscriberService = new SubscribersService(session.organization._id, session.environment._id);
+    const subscriber = await subscriberService.createSubscriber();
+
+    const tokens = Array.from({ length: SYSTEM_LIMITS.SUBSCRIBER_DEVICE_TOKENS }, (_, i) => `token_${i}`);
+
+    await updateSubscriberChannelUsecase.execute(
+      UpdateSubscriberChannelCommand.create({
+        organizationId: subscriber._organizationId,
+        subscriberId: subscriber.subscriberId,
+        environmentId: session.environment._id,
+        providerId: PushProviderIdEnum.FCM,
+        credentials: { deviceTokens: tokens },
+        oauthHandler: OAuthHandlerEnum.NOVU,
+        isIdempotentOperation: true,
+      })
+    );
+
+    const updatedSubscriber = await subscriberRepository.findOne({
+      _id: subscriber._id,
+      _environmentId: subscriber._environmentId,
+    });
+
+    const fcmChannel = updatedSubscriber?.channels?.find((channel) => channel.providerId === PushProviderIdEnum.FCM);
+
+    expect(fcmChannel?.credentials?.deviceTokens?.length).to.equal(SYSTEM_LIMITS.SUBSCRIBER_DEVICE_TOKENS);
   });
 });

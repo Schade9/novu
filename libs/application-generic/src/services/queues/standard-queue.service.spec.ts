@@ -1,16 +1,49 @@
-import { Test } from '@nestjs/testing';
-
-import { StandardQueueService } from './standard-queue.service';
-import { BullMqService } from '../bull-mq';
+import { CommunityOrganizationRepository } from '@novu/dal';
+import { PinoLogger } from '../../logging';
+import { CloudflareSchedulerService } from '../cloudflare-scheduler';
+import { FeatureFlagsService } from '../feature-flags';
 import { WorkflowInMemoryProviderService } from '../in-memory-provider';
+import { SqsService } from '../sqs';
+import { StandardQueueService } from './standard-queue.service';
 
 let standardQueueService: StandardQueueService;
+
+const mockCloudflareSchedulerService = {
+  scheduleJob: jest.fn(),
+} as unknown as CloudflareSchedulerService;
+
+const mockFeatureFlagsService = {
+  getFlag: jest.fn(),
+} as unknown as FeatureFlagsService;
+
+const mockOrganizationRepository = {
+  findOne: jest.fn(),
+} as unknown as CommunityOrganizationRepository;
+
+const mockSqsService = {
+  getQueueUrl: jest.fn(),
+  getProducer: jest.fn(),
+  getClient: jest.fn(),
+} as unknown as SqsService;
+
+const mockLogger = {
+  setContext: jest.fn(),
+  debug: jest.fn(),
+  info: jest.fn(),
+  warn: jest.fn(),
+  error: jest.fn(),
+} as unknown as PinoLogger;
 
 describe('Standard Queue service', () => {
   describe('General', () => {
     beforeAll(async () => {
       standardQueueService = new StandardQueueService(
         new WorkflowInMemoryProviderService(),
+        mockCloudflareSchedulerService,
+        mockFeatureFlagsService,
+        mockOrganizationRepository,
+        mockSqsService,
+        mockLogger
       );
       await standardQueueService.queue.obliterate();
     });
@@ -26,12 +59,7 @@ describe('Standard Queue service', () => {
     it('should be initialised properly', async () => {
       expect(standardQueueService).toBeDefined();
       expect(Object.keys(standardQueueService)).toEqual(
-        expect.arrayContaining([
-          'topic',
-          'DEFAULT_ATTEMPTS',
-          'instance',
-          'queue',
-        ]),
+        expect.arrayContaining(['topic', 'DEFAULT_ATTEMPTS', 'instance', 'queue'])
       );
       expect(standardQueueService.DEFAULT_ATTEMPTS).toEqual(3);
       expect(standardQueueService.topic).toEqual('standard');
@@ -52,7 +80,7 @@ describe('Standard Queue service', () => {
           jobsOpts: {
             removeOnComplete: true,
           },
-        }),
+        })
       );
       expect(standardQueueService.queue.opts.prefix).toEqual('bull');
     });
@@ -88,7 +116,7 @@ describe('Standard Queue service', () => {
           name: jobId,
           data: jobData,
           attemptsMade: 0,
-        }),
+        })
       );
     });
 
@@ -128,7 +156,7 @@ describe('Standard Queue service', () => {
             _userId,
           },
           attemptsMade: 0,
-        }),
+        })
       );
     });
   });
@@ -139,6 +167,11 @@ describe('Standard Queue service', () => {
 
       standardQueueService = new StandardQueueService(
         new WorkflowInMemoryProviderService(),
+        mockCloudflareSchedulerService,
+        mockFeatureFlagsService,
+        mockOrganizationRepository,
+        mockSqsService,
+        mockLogger
       );
       await standardQueueService.queue.obliterate();
     });

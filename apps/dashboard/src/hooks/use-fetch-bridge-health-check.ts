@@ -1,10 +1,10 @@
-import { ConnectionStatus } from '@/utils/types';
-import { getBridgeHealthCheck } from '@/api/bridge';
-import { QueryKeys } from '@/utils/query-keys';
-import { useEnvironment } from '@/context/environment/hooks';
-import { useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import type { HealthCheck } from '@novu/framework/internal';
+import { useQuery } from '@tanstack/react-query';
+import { useMemo } from 'react';
+import { getBridgeHealthCheck } from '@/api/bridge';
+import { useEnvironment } from '@/context/environment/hooks';
+import { QueryKeys } from '@/utils/query-keys';
+import { ConnectionStatus } from '@/utils/types';
 
 const BRIDGE_STATUS_REFRESH_INTERVAL_IN_MS = 10 * 1000;
 
@@ -19,6 +19,9 @@ export const useFetchBridgeHealthCheck = () => {
     networkMode: 'always',
     refetchOnWindowFocus: true,
     refetchInterval: BRIDGE_STATUS_REFRESH_INTERVAL_IN_MS,
+    meta: {
+      showError: false,
+    },
   });
 
   const status = useMemo<ConnectionStatus>(() => {

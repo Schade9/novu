@@ -1,9 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { HealthIndicatorResult, HealthIndicatorStatus } from '@nestjs/terminus';
 import { setTimeout } from 'timers/promises';
-
-import { Worker } from '../bull-mq';
-
 import { IHealthIndicator } from '../../health';
 import { IDestroy } from '../../modules';
 
@@ -12,7 +9,8 @@ export interface INovuWorker extends IDestroy {
   readonly topic: string;
   pause: () => Promise<void>;
   resume: () => Promise<void>;
-  worker: Worker;
+  isRunning: () => Promise<boolean>;
+  isPaused: () => Promise<boolean>;
 }
 
 const LOG_CONTEXT = 'ReadinessService';
@@ -21,7 +19,7 @@ const LOG_CONTEXT = 'ReadinessService';
 export class ReadinessService {
   constructor(
     @Inject('QUEUE_HEALTH_INDICATORS')
-    private healthIndicators: IHealthIndicator[],
+    private healthIndicators: IHealthIndicator[]
   ) {}
 
   async areQueuesEnabled(): Promise<boolean> {
@@ -32,14 +30,14 @@ export class ReadinessService {
 
     for (let i = 1; i < retries + 1; i += 1) {
       const result = await this.checkServicesHealth();
-
+      Logger.log(`Checking if queues are enabled ${i}/${retries} ${JSON.stringify(result)}`, LOG_CONTEXT);
       if (result) {
         return true;
       }
 
       Logger.warn(
         `Some health indicator returned false when checking if queues are enabled ${i}/${retries}`,
-        LOG_CONTEXT,
+        LOG_CONTEXT
       );
 
       await setTimeout(delay);
@@ -50,21 +48,13 @@ export class ReadinessService {
 
   private async checkServicesHealth() {
     try {
-      const healths = await Promise.all(
-        this.healthIndicators.map((health) => health.isHealthy()),
-      );
+      const healths = await Promise.all(this.healthIndicators.map((health) => health.isHealthy()));
 
-      const statuses = healths.map(
-        (health: HealthIndicatorResult) => Object.values(health)[0].status,
-      );
+      const statuses = healths.map((health: HealthIndicatorResult) => Object.values(health)[0].status);
 
       return statuses.every((status: HealthIndicatorStatus) => status === 'up');
     } catch (error) {
-      Logger.error(
-        error,
-        'Some health indicator throw an error when checking if queues are enabled',
-        LOG_CONTEXT,
-      );
+      Logger.error(error, 'Some health indicator throw an error when checking if queues are enabled', LOG_CONTEXT);
 
       return false;
     }
@@ -77,11 +67,7 @@ export class ReadinessService {
 
         await worker.pause();
       } catch (error) {
-        Logger.error(
-          error,
-          `Failed to pause worker ${worker.topic}.`,
-          LOG_CONTEXT,
-        );
+        Logger.error(error, `Failed to pause worker ${worker.topic}.`, LOG_CONTEXT);
 
         throw error;
       }
@@ -92,21 +78,21 @@ export class ReadinessService {
     const areQueuesEnabled = await this.areQueuesEnabled();
 
     if (areQueuesEnabled) {
+      Logger.log(`Resuming ${workers.length} workers...`, LOG_CONTEXT);
       for (const worker of workers) {
         try {
-          Logger.verbose(`Resuming worker ${worker.topic}...`, LOG_CONTEXT);
+          Logger.log(`Resuming worker ${worker.topic}...`, LOG_CONTEXT);
 
           await worker.resume();
+
+          Logger.log(`Worker ${worker.topic} resumed successfully`, LOG_CONTEXT);
         } catch (error) {
-          Logger.error(
-            error,
-            `Failed to resume worker ${worker.topic}.`,
-            LOG_CONTEXT,
-          );
+          Logger.error(error, `Failed to resume worker ${worker.topic}.`, LOG_CONTEXT);
 
           throw error;
         }
       }
+      Logger.log(`All ${workers.length} workers resumed successfully`, LOG_CONTEXT);
     } else {
       const error = new Error('Queues are not enabled');
       Logger.error(error, 'Queues are not enabled', LOG_CONTEXT);

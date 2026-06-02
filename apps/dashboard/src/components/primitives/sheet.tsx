@@ -1,9 +1,8 @@
 import * as SheetPrimitive from '@radix-ui/react-dialog';
 import { cva, type VariantProps } from 'class-variance-authority';
 import * as React from 'react';
-
-import { cn } from '@/utils/ui';
 import { RiCloseLine } from 'react-icons/ri';
+import { cn } from '@/utils/ui';
 import { CompactButton } from './button-compact';
 
 const Sheet = SheetPrimitive.Root;
@@ -39,9 +38,9 @@ const sheetVariants = cva(
         top: 'inset-x-0 top-0 border-b data-[state=closed]:slide-out-to-top data-[state=open]:slide-in-from-top',
         bottom:
           'inset-x-0 bottom-0 border-t data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom',
-        left: 'inset-y-0 left-0 h-full w-3/4 border-r data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left sm:max-w-sm',
+        left: 'inset-y-0 left-0 h-full w-3/4 border-r data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left sm:max-w-xl',
         right:
-          'inset-y-0 right-0 h-full w-3/4 border-l data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right sm:max-w-sm',
+          'inset-y-0 right-0 h-full w-3/4 border-l data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right sm:max-w-xl',
       },
     },
     defaultVariants: {
@@ -59,8 +58,8 @@ const SheetContent = React.forwardRef<React.ElementRef<typeof SheetPrimitive.Con
     <SheetPortal>
       <SheetOverlay />
       <SheetPrimitive.Content ref={ref} className={cn(sheetVariants({ side }), className)} {...props}>
-        <SheetPrimitive.Close className="absolute right-4 top-4" asChild>
-          <CompactButton size="md" variant="ghost" icon={RiCloseLine}>
+        <SheetPrimitive.Close className="absolute right-3.5 top-3.5" asChild>
+          <CompactButton size="md" variant="ghost" icon={RiCloseLine} data-close-button>
             <span className="sr-only">Close</span>
           </CompactButton>
         </SheetPrimitive.Close>
@@ -111,8 +110,6 @@ export {
   SheetFooter,
   SheetHeader,
   SheetMain,
-  SheetOverlay,
   SheetPortal,
   SheetTitle,
-  SheetTrigger,
 };

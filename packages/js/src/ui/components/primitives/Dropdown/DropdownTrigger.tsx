@@ -1,19 +1,24 @@
 import { ComponentProps, splitProps } from 'solid-js';
-import type { AppearanceKey } from '../../../types';
-import { useStyle } from '../../../helpers';
+import { cn, useStyle } from '../../../helpers';
+import type { AllAppearanceKey } from '../../../types';
 import { Popover } from '../Popover';
 
 export const dropdownTriggerButtonVariants = () =>
   `nt-relative nt-transition nt-outline-none focus-visible:nt-outline-none` +
   `focus-visible:nt-ring-2 focus-visible:nt-ring-primary focus-visible:nt-ring-offset-2`;
 
-export const DropdownTrigger = (props: ComponentProps<typeof Popover.Trigger> & { appearanceKey?: AppearanceKey }) => {
+export const DropdownTrigger = (
+  props: ComponentProps<typeof Popover.Trigger> & { appearanceKey?: AllAppearanceKey }
+) => {
   const style = useStyle();
-  const [local, rest] = splitProps(props, ['appearanceKey']);
+  const [local, rest] = splitProps(props, ['appearanceKey', 'class']);
 
   return (
     <Popover.Trigger
-      class={style(local.appearanceKey || 'dropdownTrigger', dropdownTriggerButtonVariants())}
+      class={style({
+        key: local.appearanceKey || 'dropdownTrigger',
+        className: cn(dropdownTriggerButtonVariants(), local.class),
+      })}
       {...rest}
     />
   );

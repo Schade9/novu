@@ -1,7 +1,7 @@
-/* eslint-disable global-require */
+import { Injectable, Logger } from '@nestjs/common';
+import { IEventJobData, IJobData, JobTopicNameEnum } from '@novu/shared';
 import {
   BulkJobOptions,
-  ConnectionOptions as RedisConnectionOptions,
   Job,
   JobsOptions,
   Metrics,
@@ -10,11 +10,10 @@ import {
   Queue,
   QueueBaseOptions,
   QueueOptions,
+  ConnectionOptions as RedisConnectionOptions,
   Worker,
   WorkerOptions,
 } from 'bullmq';
-import { Injectable, Logger } from '@nestjs/common';
-import { IEventJobData, IJobData, JobTopicNameEnum } from '@novu/shared';
 
 import { WorkflowInMemoryProviderService } from '../in-memory-provider';
 
@@ -44,12 +43,9 @@ export class BullMqService {
   private _queue: Queue;
   private _worker: Worker;
 
-  public static readonly pro: boolean =
-    process.env.NOVU_MANAGED_SERVICE !== undefined;
+  public static readonly pro: boolean = process.env.NOVU_MANAGED_SERVICE !== undefined;
 
-  constructor(
-    private workflowInMemoryProviderService: WorkflowInMemoryProviderService,
-  ) {}
+  constructor(private workflowInMemoryProviderService: WorkflowInMemoryProviderService) {}
 
   public get worker(): Worker {
     return this._worker;
@@ -110,15 +106,11 @@ export class BullMqService {
       }),
     };
 
-    const QueueClass = !BullMqService.pro
-      ? Queue
-      : require('@taskforcesh/bullmq-pro').QueuePro;
+    const QueueClass = !BullMqService.pro ? Queue : require('@taskforcesh/bullmq-pro').QueuePro;
 
     Logger.log(
-      `Creating queue ${topic}. BullMQ pro is ${
-        this.runningWithProQueue() ? 'Enabled' : 'Disabled'
-      }`,
-      LOG_CONTEXT,
+      `Creating queue ${topic}. BullMQ pro is ${this.runningWithProQueue() ? 'Enabled' : 'Disabled'}`,
+      LOG_CONTEXT
     );
 
     const prefix = this.generatePrefix(topic);
@@ -133,11 +125,9 @@ export class BullMqService {
   public createWorker(
     topic: JobTopicNameEnum,
     processor?: string | Processor<any, unknown | void, string>,
-    workerOptions?: WorkerOptions,
+    workerOptions?: WorkerOptions
   ) {
-    const WorkerClass = !BullMqService.pro
-      ? Worker
-      : require('@taskforcesh/bullmq-pro').WorkerPro;
+    const WorkerClass = !BullMqService.pro ? Worker : require('@taskforcesh/bullmq-pro').WorkerPro;
 
     const { concurrency, connection, lockDuration, settings } = workerOptions;
 
@@ -155,10 +145,8 @@ export class BullMqService {
     };
 
     Logger.log(
-      `Creating worker ${topic}. BullMQ pro is ${
-        this.runningWithProQueue() ? 'Enabled' : 'Disabled'
-      }`,
-      LOG_CONTEXT,
+      `Creating worker ${topic}. BullMQ pro is ${this.runningWithProQueue() ? 'Enabled' : 'Disabled'}`,
+      LOG_CONTEXT
     );
 
     const prefix = this.generatePrefix(topic);
@@ -170,12 +158,7 @@ export class BullMqService {
     return this._worker;
   }
 
-  public add(
-    name: string,
-    data: BullMqJobData,
-    options: JobsOptions = {},
-    groupId?: string,
-  ) {
+  public add(name: string, data: BullMqJobData, options: JobsOptions = {}, groupId?: string) {
     this._queue.add(name, data, {
       ...options,
       ...(BullMqService.pro && groupId
@@ -194,7 +177,7 @@ export class BullMqService {
       data: BullMqJobData;
       options?: BulkJobOptions;
       groupId?: string;
-    }[],
+    }[]
   ) {
     const jobs = data.map((job) => {
       const jobOptions = {
@@ -206,7 +189,7 @@ export class BullMqService {
       if (BullMqService.pro && job?.groupId) {
         // BulkJobOptions.group is not defined in BullMQ types, it is defined in BullMQ Pro
 
-        // @ts-ignore
+        // @ts-expect-error
         jobOptions.group = {
           id: job.groupId,
         };
@@ -286,16 +269,9 @@ export class BullMqService {
         const doNotWaitActive = true;
 
         await this._worker.pause(doNotWaitActive);
-        Logger.verbose(
-          `Worker ${this._worker.name} pause succeeded`,
-          LOG_CONTEXT,
-        );
+        Logger.verbose(`Worker ${this._worker.name} pause succeeded`, LOG_CONTEXT);
       } catch (error) {
-        Logger.error(
-          error,
-          `Worker ${this._worker.name} pause failed`,
-          LOG_CONTEXT,
-        );
+        Logger.error(error, `Worker ${this._worker.name} pause failed`, LOG_CONTEXT);
 
         throw error;
       }
@@ -306,16 +282,22 @@ export class BullMqService {
     if (this._worker) {
       try {
         await this._worker.resume();
-        Logger.verbose(
-          `Worker ${this._worker.name} resume succeeded`,
-          LOG_CONTEXT,
-        );
+        Logger.verbose(`Worker ${this._worker.name} resume succeeded`, LOG_CONTEXT);
       } catch (error) {
-        Logger.error(
-          error,
-          `Worker ${this._worker.name} resume failed`,
-          LOG_CONTEXT,
-        );
+        Logger.error(error, `Worker ${this._worker.name} resume failed`, LOG_CONTEXT);
+
+        throw error;
+      }
+    }
+  }
+
+  public async waitUntilWorkerIsReady(): Promise<void> {
+    if (this._worker) {
+      try {
+        await this._worker.waitUntilReady();
+        Logger.verbose(`Worker ${this._worker.name} is now fully ready`, LOG_CONTEXT);
+      } catch (error) {
+        Logger.error(error, `Worker ${this._worker.name} waitUntilReady failed`, LOG_CONTEXT);
 
         throw error;
       }

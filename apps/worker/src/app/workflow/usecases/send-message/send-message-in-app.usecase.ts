@@ -1,36 +1,39 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { addBreadcrumb } from '@sentry/node';
+import { Injectable } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
-
-import { MessageRepository, NotificationStepEntity, SubscriberRepository, MessageEntity } from '@novu/dal';
 import {
+  buildMessageCountKey,
+  CompileInAppTemplate,
+  CompileInAppTemplateCommand,
+  CreateExecutionDetails,
+  CreateExecutionDetailsCommand,
+  DetailEnum,
+  GetNovuProviderCredentials,
+  InstrumentUsecase,
+  InvalidateCacheService,
+  messageWebhookMapper,
+  SelectIntegration,
+  SelectVariant,
+  SendWebhookMessage,
+  WebSocketsQueueService,
+} from '@novu/application-generic';
+
+import { MessageEntity, MessageRepository, SubscriberRepository } from '@novu/dal';
+import { InAppOutput } from '@novu/framework/internal';
+import {
+  ActorTypeEnum,
   ChannelTypeEnum,
   ExecutionDetailsSourceEnum,
   ExecutionDetailsStatusEnum,
-  ActorTypeEnum,
-  WebSocketEventEnum,
   inAppMessageFromBridgeOutputs,
+  WebhookEventEnum,
+  WebhookObjectTypeEnum,
+  WebSocketEventEnum,
 } from '@novu/shared';
-import {
-  InstrumentUsecase,
-  InvalidateCacheService,
-  DetailEnum,
-  SelectIntegration,
-  buildFeedKey,
-  buildMessageCountKey,
-  GetNovuProviderCredentials,
-  SelectVariant,
-  CompileInAppTemplate,
-  CompileInAppTemplateCommand,
-  WebSocketsQueueService,
-  ExecutionLogRoute,
-  ExecutionLogRouteCommand,
-} from '@novu/application-generic';
-import { InAppOutput } from '@novu/framework/internal';
-
-import { SendMessageCommand } from './send-message.command';
-import { SendMessageBase } from './send-message.base';
+import { addBreadcrumb } from '@sentry/node';
 import { PlatformException } from '../../../shared/utils';
+import { SendMessageBase } from './send-message.base';
+import { SendMessageChannelCommand } from './send-message-channel.command';
+import { SendMessageResult, SendMessageStatus } from './send-message-type.usecase';
 
 @Injectable()
 export class SendMessageInApp extends SendMessageBase {
@@ -40,17 +43,18 @@ export class SendMessageInApp extends SendMessageBase {
     private invalidateCache: InvalidateCacheService,
     protected messageRepository: MessageRepository,
     private webSocketsQueueService: WebSocketsQueueService,
-    protected executionLogRoute: ExecutionLogRoute,
+    protected createExecutionDetails: CreateExecutionDetails,
     protected subscriberRepository: SubscriberRepository,
     protected selectIntegration: SelectIntegration,
     protected getNovuProviderCredentials: GetNovuProviderCredentials,
     protected selectVariant: SelectVariant,
     protected moduleRef: ModuleRef,
-    protected compileInAppTemplate: CompileInAppTemplate
+    protected compileInAppTemplate: CompileInAppTemplate,
+    private sendWebhookMessage: SendWebhookMessage
   ) {
     super(
       messageRepository,
-      executionLogRoute,
+      createExecutionDetails,
       subscriberRepository,
       selectIntegration,
       getNovuProviderCredentials,
@@ -60,7 +64,7 @@ export class SendMessageInApp extends SendMessageBase {
   }
 
   @InstrumentUsecase()
-  public async execute(command: SendMessageCommand) {
+  public async execute(command: SendMessageChannelCommand): Promise<SendMessageResult> {
     if (!command.step.template) throw new PlatformException('Template not found');
 
     addBreadcrumb({
@@ -78,9 +82,9 @@ export class SendMessageInApp extends SendMessageBase {
     });
 
     if (!integration) {
-      await this.executionLogRoute.execute(
-        ExecutionLogRouteCommand.create({
-          ...ExecutionLogRouteCommand.getDetailsFromJob(command.job),
+      await this.createExecutionDetails.execute(
+        CreateExecutionDetailsCommand.create({
+          ...CreateExecutionDetailsCommand.getDetailsFromJob(command.job),
           detail: DetailEnum.SUBSCRIBER_NO_ACTIVE_INTEGRATION,
           source: ExecutionDetailsSourceEnum.INTERNAL,
           status: ExecutionDetailsStatusEnum.FAILED,
@@ -89,7 +93,10 @@ export class SendMessageInApp extends SendMessageBase {
         })
       );
 
-      return;
+      return {
+        status: SendMessageStatus.FAILED,
+        errorMessage: DetailEnum.SUBSCRIBER_NO_ACTIVE_INTEGRATION,
+      };
     }
 
     const { step } = command;
@@ -138,7 +145,10 @@ export class SendMessageInApp extends SendMessageBase {
     } catch (e) {
       await this.sendErrorHandlebars(command.job, e.message);
 
-      return;
+      return {
+        status: SendMessageStatus.FAILED,
+        errorMessage: DetailEnum.MESSAGE_CONTENT_NOT_GENERATED,
+      };
     }
 
     const messagePayload = { ...command.payload };
@@ -181,13 +191,6 @@ export class SendMessageInApp extends SendMessageBase {
     let message: MessageEntity | null = null;
 
     await this.invalidateCache.invalidateQuery({
-      key: buildFeedKey().invalidate({
-        subscriberId: command.subscriberId,
-        _environmentId: command.environmentId,
-      }),
-    });
-
-    await this.invalidateCache.invalidateQuery({
       key: buildMessageCountKey().invalidate({
         subscriberId: command.subscriberId,
         _environmentId: command.environmentId,
@@ -198,8 +201,8 @@ export class SendMessageInApp extends SendMessageBase {
     const bridgeOutputs = command.bridgeData?.outputs as InAppOutput;
     const inAppMessage = inAppMessageFromBridgeOutputs(bridgeOutputs);
 
-    const channelData: Partial<
-      Pick<MessageEntity, 'content' | 'subject' | 'avatar' | 'payload' | 'cta' | 'tags' | 'data'>
+    const additionalFields: Partial<
+      Pick<MessageEntity, 'content' | 'subject' | 'avatar' | 'payload' | 'cta' | 'tags' | 'data' | 'severity'>
     > = {
       content: (this.storeContent() ? inAppMessage.content || content : null) as string,
       cta: bridgeOutputs ? inAppMessage.cta : step.template.cta,
@@ -208,10 +211,12 @@ export class SendMessageInApp extends SendMessageBase {
       payload: messagePayload,
       data: inAppMessage.data,
       tags: command.tags,
+      severity: command.severity,
     };
 
     if (!oldMessage) {
       message = await this.messageRepository.create({
+        deliveredAt: [new Date()],
         _notificationId: command.notificationId,
         _organizationId: command.organizationId,
         _environmentId: command.environmentId,
@@ -219,39 +224,45 @@ export class SendMessageInApp extends SendMessageBase {
         _templateId: command._templateId,
         _messageTemplateId: step.template._id,
         templateIdentifier: command.identifier,
+        stepId: command.step.stepId,
         transactionId: command.transactionId,
         providerId: integration.providerId,
         _feedId: step.template._feedId,
         channel: ChannelTypeEnum.IN_APP,
         _jobId: command.jobId,
+        contextKeys: command.contextKeys,
         ...(actor &&
           actor.type !== ActorTypeEnum.NONE && {
             actor,
             _actorId: command.job?._actorId,
           }),
-        ...channelData,
+        ...additionalFields,
       });
     }
 
     if (oldMessage) {
-      await this.messageRepository.update(
+      message = await this.messageRepository.findOneAndUpdate(
         { _environmentId: command.environmentId, _id: oldMessage._id },
         {
           $set: {
             seen: false,
             createdAt: new Date(),
-            ...channelData,
+            updatedAt: new Date(),
+            ...additionalFields,
           },
+        },
+        {
+          timestamps: false,
+          strict: false,
         }
       );
-      message = await this.messageRepository.findOne({ _id: oldMessage._id, _environmentId: command.environmentId });
     }
 
     if (!message) throw new PlatformException('Message not found');
 
-    await this.executionLogRoute.execute(
-      ExecutionLogRouteCommand.create({
-        ...ExecutionLogRouteCommand.getDetailsFromJob(command.job),
+    await this.createExecutionDetails.execute(
+      CreateExecutionDetailsCommand.create({
+        ...CreateExecutionDetailsCommand.getDetailsFromJob(command.job),
         messageId: message._id,
         providerId: integration.providerId,
         detail: DetailEnum.MESSAGE_CREATED,
@@ -268,6 +279,7 @@ export class SendMessageInApp extends SendMessageBase {
         event: WebSocketEventEnum.RECEIVED,
         userId: command._subscriberId,
         _environmentId: command.environmentId,
+        contextKeys: command.contextKeys,
         payload: {
           messageId: message._id,
         },
@@ -279,9 +291,9 @@ export class SendMessageInApp extends SendMessageBase {
       groupId: command.organizationId,
     });
 
-    await this.executionLogRoute.execute(
-      ExecutionLogRouteCommand.create({
-        ...ExecutionLogRouteCommand.getDetailsFromJob(command.job),
+    await this.createExecutionDetails.execute(
+      CreateExecutionDetailsCommand.create({
+        ...CreateExecutionDetailsCommand.getDetailsFromJob(command.job),
         messageId: message._id,
         providerId: integration.providerId,
         detail: DetailEnum.MESSAGE_SENT,
@@ -291,5 +303,33 @@ export class SendMessageInApp extends SendMessageBase {
         isRetry: false,
       })
     );
+
+    await this.sendWebhookMessage.execute({
+      eventType: WebhookEventEnum.MESSAGE_SENT,
+      objectType: WebhookObjectTypeEnum.MESSAGE,
+      payload: {
+        object: messageWebhookMapper(message, command.subscriberId, {
+          providerResponseId: message._id,
+        }),
+      },
+      organizationId: command.organizationId,
+      environmentId: command.environmentId,
+    });
+
+    await this.sendWebhookMessage.execute({
+      eventType: WebhookEventEnum.MESSAGE_DELIVERED,
+      objectType: WebhookObjectTypeEnum.MESSAGE,
+      payload: {
+        object: messageWebhookMapper(message, command.subscriberId, {
+          providerResponseId: message._id,
+        }),
+      },
+      organizationId: command.organizationId,
+      environmentId: command.environmentId,
+    });
+
+    return {
+      status: SendMessageStatus.SUCCESS,
+    };
   }
 }

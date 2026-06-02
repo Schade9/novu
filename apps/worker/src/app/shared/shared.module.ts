@@ -2,37 +2,47 @@ import { Module } from '@nestjs/common';
 import {
   analyticsService,
   BulkCreateExecutionDetails,
-  cacheService,
+  CloudflareSchedulerService,
   ComputeJobWaitDurationService,
   CreateExecutionDetails,
-  createNestLoggingModuleOptions,
   CreateNotificationJobs,
-  CreateSubscriber,
+  CreateOrUpdateSubscriberUseCase,
   CreateTenant,
+  cacheService,
+  clickHouseBatchService,
+  clickHouseService,
+  createNestLoggingModuleOptions,
   DalServiceHealthIndicator,
   DigestFilterSteps,
-  distributedLockService,
-  EventsDistributedLockService,
   ExecuteBridgeRequest,
+  ExecuteFrameworkRequest,
+  ExecuteStepResolverRequest,
   featureFlagsService,
   GetDecryptedSecretKey,
   GetTenant,
+  HttpClientService,
+  InMemoryLRUCacheService,
   InvalidateCacheService,
   LoggerModule,
   MetricsModule,
-  ProcessSubscriber,
   ProcessTenant,
   QueuesModule,
+  StepRunRepository,
   StorageHelperService,
   storageService,
+  TraceLogRepository,
   UpdateSubscriber,
   UpdateSubscriberChannel,
   UpdateTenant,
+  WorkflowRunRepository,
+  WorkflowRunService,
 } from '@novu/application-generic';
 import {
+  AgentIntegrationRepository,
   ControlValuesRepository,
   DalService,
   EnvironmentRepository,
+  EnvironmentVariableRepository,
   ExecutionDetailsRepository,
   IntegrationRepository,
   JobRepository,
@@ -55,7 +65,9 @@ import { UNIQUE_WORKER_DEPENDENCIES } from '../../config/worker-init.config';
 import { ActiveJobsMetricService } from '../workflow/services';
 
 const DAL_MODELS = [
+  AgentIntegrationRepository,
   EnvironmentRepository,
+  EnvironmentVariableRepository,
   ExecutionDetailsRepository,
   NotificationTemplateRepository,
   SubscriberRepository,
@@ -78,28 +90,39 @@ const dalService = {
   useFactory: async () => {
     const service = new DalService();
 
-    await service.connect(process.env.MONGO_URL);
+    await service.connect(process.env.MONGO_URL!);
 
     return service;
   },
 };
 
+const ANALYTICS_PROVIDERS = [
+  // Repositories
+  TraceLogRepository,
+  StepRunRepository,
+  WorkflowRunRepository,
+
+  // Services
+  clickHouseService,
+  clickHouseBatchService,
+  WorkflowRunService,
+];
+
 const PROVIDERS = [
   analyticsService,
   BulkCreateExecutionDetails,
   cacheService,
+  CloudflareSchedulerService,
   ComputeJobWaitDurationService,
   CreateExecutionDetails,
   CreateNotificationJobs,
-  CreateSubscriber,
+  CreateOrUpdateSubscriberUseCase,
   dalService,
   DalServiceHealthIndicator,
   DigestFilterSteps,
-  distributedLockService,
-  EventsDistributedLockService,
   featureFlagsService,
+  InMemoryLRUCacheService,
   InvalidateCacheService,
-  ProcessSubscriber,
   StorageHelperService,
   storageService,
   UpdateSubscriber,
@@ -111,7 +134,11 @@ const PROVIDERS = [
   ...DAL_MODELS,
   ActiveJobsMetricService,
   ExecuteBridgeRequest,
+  ExecuteFrameworkRequest,
+  ExecuteStepResolverRequest,
   GetDecryptedSecretKey,
+  HttpClientService,
+  ...ANALYTICS_PROVIDERS,
 ];
 
 @Module({

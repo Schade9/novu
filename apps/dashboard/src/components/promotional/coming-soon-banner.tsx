@@ -1,10 +1,10 @@
-import { ToggleGroup, ToggleGroupItem } from '@/components/primitives/toggle-group';
-import { useTelemetry } from '@/hooks/use-telemetry';
-import { TelemetryEvent } from '@/utils/telemetry';
 import { AnimatePresence, motion } from 'motion/react';
 import { useCallback, useRef, useState } from 'react';
 import { RiCloseFill } from 'react-icons/ri';
 import { toast } from 'sonner';
+import { ToggleGroup, ToggleGroupItem } from '@/components/primitives/toggle-group';
+import { useTelemetry } from '@/hooks/use-telemetry';
+import { TelemetryEvent } from '@/utils/telemetry';
 import { CompactButton } from '../primitives/button-compact';
 import { Card, CardContent } from '../primitives/card';
 
@@ -51,7 +51,7 @@ interface UsePromotionalBannerResult {
 }
 
 export function usePromotionalBanner(props: UsePromotionalBannerProps): UsePromotionalBannerResult {
-  const toastId = useRef<string | number>();
+  const toastId = useRef<string | number | null>(null);
   const track = useTelemetry();
 
   const hide = useCallback(() => {
@@ -62,9 +62,8 @@ export function usePromotionalBanner(props: UsePromotionalBannerProps): UsePromo
       });
 
       toast.dismiss(toastId.current);
-      toastId.current = undefined;
+      toastId.current = null;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const show = useCallback(() => {
@@ -80,7 +79,7 @@ export function usePromotionalBanner(props: UsePromotionalBannerProps): UsePromo
         <PromotionalBannerContent
           onDismiss={() => {
             toast.dismiss(id);
-            toastId.current = undefined;
+            toastId.current = null;
             props.onDismiss?.();
           }}
           onReactionSelect={props.onReactionSelect}
@@ -94,7 +93,6 @@ export function usePromotionalBanner(props: UsePromotionalBannerProps): UsePromo
     );
 
     toastId.current = id;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props]);
 
   return { show, hide };
@@ -231,7 +229,7 @@ function FeedbackSection({
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.2 + index * 0.1 }}
-                className="w-full rounded-none border-r-[1px] border-[#D1D5DB] transition-colors last:border-r-0 hover:bg-[#F8F9FB] data-[state=on]:bg-[#F8F9FB]"
+                className="w-full rounded-none border-r border-[#D1D5DB] transition-colors last:border-r-0 hover:bg-[#F8F9FB] data-[state=on]:bg-[#F8F9FB]"
                 whileTap={{ scale: 0.95 }}
               >
                 <ToggleGroupItem className="w-full py-2.5 text-xl transition-colors" value={reaction.value}>

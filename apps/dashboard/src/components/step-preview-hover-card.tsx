@@ -6,9 +6,9 @@ import {
   PushRenderOutput,
   StepTypeEnum,
 } from '@novu/shared';
+import { Maily } from './maily/maily';
 import { ChatPreview } from './workflow-editor/steps/chat/chat-preview';
 import { EmailPreviewHeader, EmailPreviewSubject } from './workflow-editor/steps/email/email-preview';
-import { Maily } from './workflow-editor/steps/email/maily';
 import { InboxPreview } from './workflow-editor/steps/in-app/inbox-preview';
 import { PushPreview } from './workflow-editor/steps/push/push-preview';
 import { SmsPhone } from './workflow-editor/steps/sms/sms-phone';
@@ -46,14 +46,14 @@ export function StepPreview({ type, controlValues }: StepPreviewProps) {
   }
 
   if (type === StepTypeEnum.EMAIL) {
-    const { subject, body } = controlValues;
+    const { subject, body, from } = controlValues;
 
     return (
       <div className="bg-background p-3">
-        <EmailPreviewHeader />
+        <EmailPreviewHeader previewFrom={from} />
         <EmailPreviewSubject className="px-3 py-2" subject={subject} />
         <div className="mx-auto w-full overflow-auto">
-          <Maily value={body} />
+          <Maily value={body} translationValueInput={() => null} />
         </div>
       </div>
     );

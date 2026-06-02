@@ -1,6 +1,6 @@
 import { ChannelTypeEnum } from '../../types';
-import { ISubscriberFeedResponseDto } from '../subscriber';
 import { IActorDto, IMessageCTADto } from '../message-template';
+import { ISubscriberFeedResponseDto } from '../subscriber';
 
 export interface INotificationDto {
   _id: string;
@@ -25,8 +25,8 @@ export interface INotificationDto {
   channel: ChannelTypeEnum;
   read: boolean;
   seen: boolean;
+  archived: boolean;
   subject?: string | null;
-  deleted: boolean;
   deviceTokens?: string[] | null;
   cta: IMessageCTADto;
   status: 'sent' | 'error' | 'warning';

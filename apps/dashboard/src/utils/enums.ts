@@ -7,16 +7,19 @@ export enum StepTypeEnum {
   DIGEST = 'digest',
   TRIGGER = 'trigger',
   DELAY = 'delay',
+  THROTTLE = 'throttle',
   CUSTOM = 'custom',
+  HTTP_REQUEST = 'http_request',
 }
 
-export enum WorkflowTypeEnum {
+export enum ResourceTypeEnum {
   REGULAR = 'REGULAR',
-  ECHO = 'ECHO', // @deprecated
+  /** @deprecated Use BRIDGE instead */
+  ECHO = 'ECHO',
   BRIDGE = 'BRIDGE',
 }
 
-export enum WorkflowOriginEnum {
+export enum ResourceOriginEnum {
   NOVU_CLOUD = 'novu-cloud',
   NOVU_CLOUD_V1 = 'novu-cloud-v1',
   EXTERNAL = 'external',

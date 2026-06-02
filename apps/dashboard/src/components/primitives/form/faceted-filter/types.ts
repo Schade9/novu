@@ -6,6 +6,7 @@ export type SizeType = 'default' | 'small';
 export interface FilterOption {
   label: string;
   value: string;
+  disabled?: boolean;
   icon?: ComponentType<{ className?: string }>;
 }
 
@@ -23,6 +24,13 @@ export interface FacetedFilterProps {
   onOpenChange?: (open: boolean) => void;
   icon?: ComponentType<{ className?: string }>;
   hideTitle?: boolean;
+  hidePlusIcon?: boolean;
   hideSearch?: boolean;
   hideClear?: boolean;
+  className?: string;
+  trailingNode?: React.ReactNode;
+  disabled?: boolean;
+  searchQuery?: string;
+  onSearchQueryChange?: (query: string) => void;
+  isLoading?: boolean;
 }

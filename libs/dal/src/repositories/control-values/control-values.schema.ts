@@ -7,7 +7,7 @@ const mongooseDelete = require('mongoose-delete');
 
 export type ControlValuesModel = ChangePropsValueType<
   ControlValuesEntity,
-  '_environmentId' | '_organizationId' | '_workflowId'
+  '_environmentId' | '_organizationId' | '_workflowId' | '_layoutId'
 >;
 
 const controlValuesSchema = new Schema<ControlValuesModel>(
@@ -23,12 +23,14 @@ const controlValuesSchema = new Schema<ControlValuesModel>(
     _workflowId: {
       type: Schema.Types.ObjectId,
       ref: 'NotificationTemplate',
-      index: true,
     },
     _stepId: {
-      index: true,
       type: Schema.Types.ObjectId,
     } as any,
+    _layoutId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Layout',
+    },
     level: Schema.Types.String,
     priority: Schema.Types.Number,
     controls: Schema.Types.Mixed,
@@ -36,7 +38,12 @@ const controlValuesSchema = new Schema<ControlValuesModel>(
   schemaOptions
 );
 
-controlValuesSchema.plugin(mongooseDelete, { deletedAt: true, deletedBy: true, overrideMethods: 'all' });
+controlValuesSchema.plugin(mongooseDelete, {
+  deletedAt: true,
+  deletedBy: true,
+  overrideMethods: 'all',
+  use$neOperator: false,
+});
 
 export const ControlValues =
   (mongoose.models.ControlValues as mongoose.Model<ControlValuesModel>) ||

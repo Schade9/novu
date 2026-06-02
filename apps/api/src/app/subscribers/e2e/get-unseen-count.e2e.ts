@@ -1,11 +1,11 @@
+import { Novu } from '@novu/api';
+import { SubscribersV1ControllerGetUnseenCountRequest } from '@novu/api/models/operations';
+import { NotificationTemplateEntity, SubscriberRepository } from '@novu/dal';
 import { UserSession } from '@novu/testing';
 import { expect } from 'chai';
-import { NotificationTemplateEntity, SubscriberRepository } from '@novu/dal';
-import { Novu } from '@novu/api';
-import { SubscribersControllerGetUnseenCountRequest } from '@novu/api/models/operations';
 import { expectSdkExceptionGeneric, initNovuClassSdk } from '../../shared/helpers/e2e/sdk/e2e-sdk.helper';
 
-describe('Get Unseen Count - /:subscriberId/notifications/unseen (GET) #novu-v2', function () {
+describe('Get Unseen Count - /:subscriberId/notifications/unseen (GET) #novu-v2', () => {
   let session: UserSession;
   let template: NotificationTemplateEntity;
   let subscriberId: string;
@@ -22,10 +22,10 @@ describe('Get Unseen Count - /:subscriberId/notifications/unseen (GET) #novu-v2'
     subscriberId = SubscriberRepository.createObjectId();
   });
 
-  it('should throw exception on invalid subscriber id', async function () {
-    await novuClient.trigger({ name: template.triggers[0].identifier, to: subscriberId });
+  it('should throw exception on invalid subscriber id', async () => {
+    await novuClient.trigger({ workflowId: template.triggers[0].identifier, to: subscriberId });
 
-    await session.awaitRunningJobs(template._id);
+    await session.waitForJobCompletion(template._id);
 
     const seenCount = await getUnSeenCount({ seen: false, subscriberId });
     expect(seenCount).to.equal(1);
@@ -38,7 +38,7 @@ describe('Get Unseen Count - /:subscriberId/notifications/unseen (GET) #novu-v2'
       `Subscriber ${`${subscriberId}111`} is not exist in environment`
     );
   });
-  async function getUnSeenCount(query: SubscribersControllerGetUnseenCountRequest) {
+  async function getUnSeenCount(query: SubscribersV1ControllerGetUnseenCountRequest) {
     const response = await novuClient.subscribers.notifications.unseenCount(query);
 
     return response.result.count;

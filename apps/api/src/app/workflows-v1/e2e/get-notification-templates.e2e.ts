@@ -1,6 +1,4 @@
-import { expect } from 'chai';
 import { NotificationTemplateEntity } from '@novu/dal';
-import { UserSession, NotificationTemplateService } from '@novu/testing';
 import {
   ChannelCTATypeEnum,
   FieldLogicalOperatorEnum,
@@ -10,8 +8,10 @@ import {
   TemplateVariableTypeEnum,
   TriggerTypeEnum,
 } from '@novu/shared';
+import { NotificationTemplateService, UserSession } from '@novu/testing';
+import { expect } from 'chai';
 
-describe('Get workflows - /workflows (GET) #novu-v1', async () => {
+describe('Get workflows - /workflows (GET) #novu-v0', async () => {
   let session: UserSession;
   const templates: NotificationTemplateEntity[] = [];
   let notificationTemplateService: NotificationTemplateService;
@@ -193,6 +193,12 @@ describe('Get workflows - /workflows (GET) #novu-v1', async () => {
     for (let i = 0; i < count; i += 1) {
       expect(body.data[i].triggers[0].identifier).to.contain(`${triggerIdentifier}`);
     }
+  });
+
+  it('should reject a negative page parameter', async () => {
+    const { body } = await session.testAgent.get(`/v1/workflows?page=-1&limit=10`);
+
+    expect(body.statusCode).to.equal(400);
   });
 
   it('should filter workflows based on both the name and trigger identifier', async () => {

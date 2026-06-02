@@ -1,32 +1,19 @@
 import { Logger } from '@nestjs/common';
-
 import { InMemoryProviderService } from './in-memory-provider.service';
-import {
-  InMemoryProviderEnum,
-  InMemoryProviderClient,
-  ScanStream,
-} from './types';
-
-import { GetIsInMemoryClusterModeEnabled } from '../../usecases';
+import { InMemoryProviderClient, InMemoryProviderEnum, ScanStream } from './types';
+import { isClusterModeEnabled } from './utils';
 
 const LOG_CONTEXT = 'WebSocketsInMemoryProviderService';
 
 export class WebSocketsInMemoryProviderService {
   public inMemoryProviderService: InMemoryProviderService;
   public isCluster: boolean;
-  private getIsInMemoryClusterModeEnabled: GetIsInMemoryClusterModeEnabled;
 
   constructor() {
-    this.getIsInMemoryClusterModeEnabled =
-      new GetIsInMemoryClusterModeEnabled();
-
     const provider = this.selectProvider();
     this.isCluster = this.isClusterMode();
 
-    this.inMemoryProviderService = new InMemoryProviderService(
-      provider,
-      this.isCluster,
-    );
+    this.inMemoryProviderService = new InMemoryProviderService(provider, this.isCluster);
   }
 
   /**
@@ -38,7 +25,7 @@ export class WebSocketsInMemoryProviderService {
    * mapping in the /in-memory-provider/providers/index.ts
    */
   private selectProvider(): InMemoryProviderEnum {
-    if (process.env.IS_SELF_HOSTED) {
+    if (process.env.IS_SELF_HOSTED === 'true' && process.env.NOVU_ENTERPRISE === 'false') {
       return InMemoryProviderEnum.REDIS;
     }
 
@@ -50,18 +37,14 @@ export class WebSocketsInMemoryProviderService {
   }
 
   private isClusterMode(): boolean {
-    const isClusterModeEnabled = this.getIsInMemoryClusterModeEnabled.execute();
+    const isEnabled = isClusterModeEnabled();
 
     Logger.log(
-      this.descriptiveLogMessage(
-        `Cluster mode ${
-          isClusterModeEnabled ? 'IS' : 'IS NOT'
-        } enabled for ${LOG_CONTEXT}`,
-      ),
-      LOG_CONTEXT,
+      this.descriptiveLogMessage(`Cluster mode ${isEnabled ? 'IS' : 'IS NOT'} enabled for ${LOG_CONTEXT}`),
+      LOG_CONTEXT
     );
 
-    return isClusterModeEnabled;
+    return isEnabled;
   }
 
   public async initialize(): Promise<void> {
@@ -73,7 +56,7 @@ export class WebSocketsInMemoryProviderService {
   }
 
   public getClientStatus(): string {
-    return this.getClient().status;
+    return this.getClient()?.status || 'disconnected';
   }
 
   public getTtl(): number {
@@ -89,8 +72,7 @@ export class WebSocketsInMemoryProviderService {
   }
 
   public providerInUseIsInClusterMode(): boolean {
-    const providerConfigured =
-      this.inMemoryProviderService.getProvider.configured;
+    const providerConfigured = this.inMemoryProviderService.getProvider.configured;
 
     return this.isCluster || providerConfigured !== InMemoryProviderEnum.REDIS;
   }

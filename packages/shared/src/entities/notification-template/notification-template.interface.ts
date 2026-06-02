@@ -1,11 +1,18 @@
-import type { BuilderFieldType, BuilderGroupValues, CustomDataType, FilterParts, WorkflowTypeEnum } from '../../types';
 import { JSONSchemaDto } from '../../dto/workflows';
-import type { ContentIssue, StepIssue } from '../../dto/workflows/step.dto';
+import type {
+  BuilderFieldType,
+  BuilderGroupValues,
+  CustomDataType,
+  FilterParts,
+  ResourceOriginEnum,
+  ResourceTypeEnum,
+} from '../../types';
+import { RuntimeIssue } from '../../utils/issues';
 import { ControlSchemas, IMessageTemplate } from '../message-template';
 import { INotificationGroup } from '../notification-group';
 import { INotificationBridgeTrigger, INotificationTrigger } from '../notification-trigger';
-import { IPreferenceChannels } from '../subscriber-preference';
 import { IWorkflowStepMetadata } from '../step';
+import { IPreferenceChannels } from '../subscriber-preference';
 
 export interface INotificationTemplate {
   _id?: string;
@@ -25,12 +32,12 @@ export interface INotificationTemplate {
   triggers: INotificationTrigger[];
   isBlueprint?: boolean;
   blueprintId?: string;
-  type?: WorkflowTypeEnum;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  type?: ResourceTypeEnum;
   payloadSchema?: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   rawData?: any;
   data?: CustomDataType;
+  origin?: ResourceOriginEnum;
+  isTranslationEnabled?: boolean;
 }
 
 export class IGroupedBlueprint {
@@ -43,8 +50,8 @@ export interface IBlueprint extends INotificationTemplate {
 }
 
 export class StepIssues {
-  body?: Record<string, StepIssue>;
-  controls?: Record<string, ContentIssue[]>;
+  controls?: Record<string, RuntimeIssue[]>;
+  integration?: Record<string, RuntimeIssue[]>;
 }
 
 export interface IStepVariant {

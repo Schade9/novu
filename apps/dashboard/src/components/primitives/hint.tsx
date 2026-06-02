@@ -10,7 +10,7 @@ const HINT_ICON_NAME = 'HintIcon';
 export const hintVariants = tv({
   slots: {
     root: 'group flex items-center gap-1 text-paragraph-xs text-text-sub',
-    icon: 'size-4 shrink-0 text-text-soft',
+    icon: 'size-4 shrink-0 text-text-soft self-start',
   },
   variants: {
     disabled: {
@@ -54,6 +54,7 @@ function HintRoot({ children, hasError, disabled, className, ...rest }: HintRoot
     </div>
   );
 }
+
 HintRoot.displayName = HINT_ROOT_NAME;
 
 function HintIcon<T extends React.ElementType>({
@@ -68,6 +69,7 @@ function HintIcon<T extends React.ElementType>({
 
   return <Component className={icon({ class: className })} {...rest} />;
 }
+
 HintIcon.displayName = HINT_ICON_NAME;
 
-export { HintRoot as Hint, HintIcon as HintIcon, HintRoot as Root };
+export { HintRoot as Hint, HintIcon, HintRoot as Root };

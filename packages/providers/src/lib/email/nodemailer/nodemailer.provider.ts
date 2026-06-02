@@ -1,11 +1,11 @@
 import { EmailProviderIdEnum } from '@novu/shared';
 import {
   ChannelTypeEnum,
+  CheckIntegrationResponseEnum,
+  ICheckIntegrationResponse,
   IEmailOptions,
   IEmailProvider,
   ISendMessageSuccessResponse,
-  ICheckIntegrationResponse,
-  CheckIntegrationResponseEnum,
 } from '@novu/stateless';
 import nodemailer, { SendMailOptions, Transporter } from 'nodemailer';
 import DKIM from 'nodemailer/lib/dkim';
@@ -53,6 +53,8 @@ export class NodemailerProvider extends BaseProvider implements IEmailProvider {
       host: this.config.host,
       port: this.config.port,
       secure: this.config.secure,
+      connectionTimeout: 10000,
+      socketTimeout: 10000,
       auth: authEnabled
         ? {
             user: this.config.user,
@@ -87,20 +89,17 @@ export class NodemailerProvider extends BaseProvider implements IEmailProvider {
     try {
       JSON.parse(JSON.stringify(this.config.tlsOptions));
     } catch {
-      throw new Error(
-        'TLS options is not a valid JSON. Check again the value set for NODEMAILER_TLS_OPTIONS',
-      );
+      throw new Error('TLS options is not a valid JSON. Check again the value set for NODEMAILER_TLS_OPTIONS');
     }
   }
 
   async sendMessage(
     options: IEmailOptions,
-    bridgeProviderData: WithPassthrough<Record<string, unknown>> = {},
+    bridgeProviderData: WithPassthrough<Record<string, unknown>> = {}
   ): Promise<ISendMessageSuccessResponse> {
     const mailData = this.createMailData(options);
-    const info = await this.transports.sendMail(
-      this.transform(bridgeProviderData, mailData).body,
-    );
+    const merged = this.transform(bridgeProviderData, mailData);
+    const info = await this.transports.sendMail(merged.body);
 
     return {
       id: info?.messageId,
@@ -108,9 +107,7 @@ export class NodemailerProvider extends BaseProvider implements IEmailProvider {
     };
   }
 
-  async checkIntegration(
-    options: IEmailOptions,
-  ): Promise<ICheckIntegrationResponse> {
+  async checkIntegration(options: IEmailOptions): Promise<ICheckIntegrationResponse> {
     try {
       const mailData = this.createMailData(options);
       await this.transports.sendMail(mailData);
@@ -140,17 +137,25 @@ export class NodemailerProvider extends BaseProvider implements IEmailProvider {
       subject: options.subject,
       html: options.html,
       text: options.text,
+      ...(options.alternatives?.length ? { alternatives: options.alternatives } : {}),
       cc: options.cc,
       attachments: options.attachments?.map((attachment) => ({
         filename: attachment?.name,
         content: attachment.file,
         contentType: attachment.mime,
+        cid: attachment.cid,
+        contentDisposition:
+          (attachment.disposition as 'inline' | 'attachment') ?? (attachment.cid ? 'inline' : undefined),
       })),
       bcc: options.bcc,
     };
 
     if (options.replyTo) {
       sendMailOptions.replyTo = options.replyTo;
+    }
+
+    if (options.headers && Object.keys(options.headers).length > 0) {
+      sendMailOptions.headers = options.headers;
     }
 
     return sendMailOptions;

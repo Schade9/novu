@@ -1,4 +1,4 @@
-import { autoUpdate, flip, offset, OffsetOptions, Placement, shift } from '@floating-ui/dom';
+import { autoUpdate, flip, OffsetOptions, offset, Placement, shift } from '@floating-ui/dom';
 import { useFloating } from 'solid-floating-ui';
 import { Accessor, createContext, createMemo, createSignal, JSX, Setter, useContext } from 'solid-js';
 
@@ -7,7 +7,7 @@ type PopoverRootProps = {
   children?: JSX.Element;
   fallbackPlacements?: Placement[];
   placement?: Placement;
-  onOpenChange?: Setter<boolean>;
+  onOpenChange?: (isOpen: boolean) => void;
   offset?: OffsetOptions;
 };
 
@@ -26,26 +26,23 @@ const PopoverContext = createContext<PopoverContextValue | undefined>(undefined)
 
 export function PopoverRoot(props: PopoverRootProps) {
   const [uncontrolledIsOpen, setUncontrolledIsOpen] = createSignal(props.open ?? false);
-  const onOpenChange = () => props.onOpenChange ?? setUncontrolledIsOpen;
   const open = () => props.open ?? uncontrolledIsOpen();
   const [reference, setReference] = createSignal<HTMLElement | null>(null);
   const [floating, setFloating] = createSignal<HTMLElement | null>(null);
 
   const position = useFloating(reference, floating, {
-    placement: props.placement || 'bottom-start',
-    whileElementsMounted: (reference, floating, update) =>
-      autoUpdate(reference, floating, update, {
-        elementResize: false,
-        ancestorScroll: false,
-        animationFrame: false,
-        layoutShift: false,
-      }),
+    strategy: 'absolute',
+    placement: props.placement,
+    whileElementsMounted: autoUpdate,
     middleware: [
-      offset(props.offset ?? 10),
-      flip({
-        fallbackPlacements: props.fallbackPlacements || ['top-start'],
+      offset(10),
+      flip({ fallbackPlacements: props.fallbackPlacements }),
+      // Configure shift to prevent layout overflow and UI shifts
+      shift({
+        padding: 8,
+        crossAxis: false, // Prevent horizontal shifting that causes layout gaps
+        mainAxis: true, // Allow vertical shifting only
       }),
-      shift(),
     ],
   });
   const floatingStyles = createMemo(() => ({
@@ -55,11 +52,21 @@ export function PopoverRoot(props: PopoverRootProps) {
   }));
 
   const onClose = () => {
-    onOpenChange()(false);
+    if (props.onOpenChange) {
+      props.onOpenChange(false);
+      return;
+    }
+
+    setUncontrolledIsOpen(false);
   };
 
   const onToggle = () => {
-    onOpenChange()((prev) => !prev);
+    if (props.onOpenChange) {
+      props.onOpenChange(!props.open);
+      return;
+    }
+
+    setUncontrolledIsOpen((prev) => !prev);
   };
 
   return (

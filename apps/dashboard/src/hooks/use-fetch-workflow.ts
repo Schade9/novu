@@ -1,19 +1,19 @@
-import { useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import type { WorkflowResponseDto } from '@novu/shared';
-import { QueryKeys } from '@/utils/query-keys';
+import { useQuery } from '@tanstack/react-query';
+import { useMemo } from 'react';
 import { getWorkflow } from '@/api/workflows';
 import { useEnvironment } from '@/context/environment/hooks';
-import { getWorkflowIdFromSlug, WORKFLOW_DIVIDER } from '@/utils/step';
+import { getIdFromSlug, WORKFLOW_DIVIDER } from '@/utils/id-utils';
+import { QueryKeys } from '@/utils/query-keys';
 
 export const useFetchWorkflow = ({ workflowSlug }: { workflowSlug?: string }) => {
   const { currentEnvironment } = useEnvironment();
   const workflowId = useMemo(
-    () => getWorkflowIdFromSlug({ slug: workflowSlug ?? '', divider: WORKFLOW_DIVIDER }),
+    () => getIdFromSlug({ slug: workflowSlug ?? '', divider: WORKFLOW_DIVIDER }),
     [workflowSlug]
   );
 
-  const { data, isPending, error } = useQuery<WorkflowResponseDto>({
+  const { data, isPending, error, refetch } = useQuery<WorkflowResponseDto>({
     queryKey: [QueryKeys.fetchWorkflow, currentEnvironment?._id, workflowId],
     queryFn: () => getWorkflow({ environment: currentEnvironment!, workflowSlug }),
     enabled: !!currentEnvironment?._id && !!workflowSlug,
@@ -23,5 +23,6 @@ export const useFetchWorkflow = ({ workflowSlug }: { workflowSlug?: string }) =>
     workflow: data,
     isPending,
     error,
+    refetch,
   };
 };

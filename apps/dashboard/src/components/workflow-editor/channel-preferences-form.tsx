@@ -1,35 +1,45 @@
-import { zodResolver } from '@hookform/resolvers/zod';
-import { ChannelTypeEnum, WorkflowPreferences, WorkflowResponseDto } from '@novu/shared';
+import { standardSchemaResolver } from '@hookform/resolvers/standard-schema';
+import {
+  ChannelTypeEnum,
+  PermissionsEnum,
+  SeverityLevelEnum,
+  WorkflowPreferences,
+  WorkflowResponseDto,
+} from '@novu/shared';
 import { motion } from 'motion/react';
 import { useMemo } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { RiArrowLeftSLine, RiCloseFill, RiInformationFill } from 'react-icons/ri';
 import { Link } from 'react-router-dom';
-import { z } from 'zod';
 
+import { STEP_TYPE_TO_ICON } from '@/components/icons/utils';
+import { PageMeta } from '@/components/page-meta';
+import { CompactButton } from '@/components/primitives/button-compact';
+import { Card, CardContent } from '@/components/primitives/card';
+import { Checkbox } from '@/components/primitives/checkbox';
+import { Form, FormControl, FormField, FormItem, FormLabel, FormRoot } from '@/components/primitives/form/form';
+import { Separator } from '@/components/primitives/separator';
+import { Step } from '@/components/primitives/step';
+import { Switch } from '@/components/primitives/switch';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/primitives/tooltip';
 import { SidebarContent, SidebarHeader } from '@/components/side-navigation/sidebar';
 import { UserPreferencesFormSchema } from '@/components/workflow-editor/schema';
 import { UpdateWorkflowFn } from '@/components/workflow-editor/workflow-provider';
+import { useHasPermission } from '@/hooks/use-has-permission';
 import { useTelemetry } from '@/hooks/use-telemetry';
 import { STEP_TYPE_TO_COLOR } from '@/utils/color';
-import { StepTypeEnum, WorkflowOriginEnum } from '@/utils/enums';
+import { ResourceOriginEnum, StepTypeEnum } from '@/utils/enums';
 import { capitalize } from '@/utils/string';
 import { TelemetryEvent } from '@/utils/telemetry';
 import { cn } from '@/utils/ui';
-import { STEP_TYPE_TO_ICON } from '../icons/utils';
-import { PageMeta } from '../page-meta';
-import { CompactButton } from '../primitives/button-compact';
-import { Card, CardContent } from '../primitives/card';
-import { Checkbox } from '../primitives/checkbox';
-import { Form, FormControl, FormField, FormItem, FormLabel } from '../primitives/form/form';
-import { Separator } from '../primitives/separator';
-import { Step } from '../primitives/step';
-import { Switch } from '../primitives/switch';
-import { Tooltip, TooltipContent, TooltipTrigger } from '../primitives/tooltip';
+import { Badge } from '../primitives/badge';
+import { Select, SelectContent, SelectTrigger, SelectValue } from '../primitives/select';
+import { SeveritySelectItem } from './severity-select-item';
 
 type ConfigureWorkflowFormProps = {
   workflow: WorkflowResponseDto;
   update: UpdateWorkflowFn;
+  isReadOnly?: boolean;
 };
 
 const CHANNEL_LABELS_LOOKUP: Record<`${ChannelTypeEnum}` | 'all', string> = {
@@ -49,11 +59,14 @@ const checkHasEveryChannelSameValue = (
 };
 
 export const ChannelPreferencesForm = (props: ConfigureWorkflowFormProps) => {
-  const { workflow, update } = props;
+  const { workflow, update, isReadOnly: readOnlyProp } = props;
   const track = useTelemetry();
+  const has = useHasPermission();
+  const permissionReadOnly = !has({ permission: PermissionsEnum.WORKFLOW_WRITE });
+  const isReadOnly = readOnlyProp ?? permissionReadOnly;
 
   const isDefaultPreferences = useMemo(() => workflow.preferences.user === null, [workflow.preferences.user]);
-  const isDashboardWorkflow = useMemo(() => workflow.origin === WorkflowOriginEnum.NOVU_CLOUD, [workflow.origin]);
+  const isDashboardWorkflow = useMemo(() => workflow.origin === ResourceOriginEnum.NOVU_CLOUD, [workflow.origin]);
   const formDataToRender = useMemo(() => {
     const steps = new Set(workflow.steps.map((step) => step.type));
     const defaultPreferences = isDefaultPreferences ? workflow.preferences.default : workflow.preferences.user;
@@ -70,17 +83,22 @@ export const ChannelPreferencesForm = (props: ConfigureWorkflowFormProps) => {
     };
   }, [isDefaultPreferences, workflow.preferences.default, workflow.preferences.user, workflow.steps]);
 
-  const form = useForm<z.infer<typeof UserPreferencesFormSchema>>({
-    defaultValues: {
+  const defaultValues = useMemo(() => {
+    return {
       user: workflow.preferences.user ?? workflow.preferences.default,
-    },
-    resolver: zodResolver(UserPreferencesFormSchema),
+      severity: workflow?.severity ?? SeverityLevelEnum.NONE,
+    };
+  }, [workflow.preferences.default, workflow.preferences.user, workflow.severity]);
+
+  const form = useForm({
+    defaultValues,
+    resolver: standardSchemaResolver(UserPreferencesFormSchema),
     shouldFocusError: false,
   });
 
   const overrideForm = useForm({
     defaultValues: {
-      override: isDashboardWorkflow ? true : !isDefaultPreferences,
+      override: isReadOnly ? false : isDashboardWorkflow ? true : !isDefaultPreferences,
     },
   });
 
@@ -98,6 +116,7 @@ export const ChannelPreferencesForm = (props: ConfigureWorkflowFormProps) => {
     const value = userPreferences === null ? workflow.preferences.default : userPreferences;
     form.reset({
       user: value,
+      severity: defaultValues.severity,
     });
   };
 
@@ -119,6 +138,7 @@ export const ChannelPreferencesForm = (props: ConfigureWorkflowFormProps) => {
     // If all channels are same value(all true or all false), update the "all" channel value to true/false
     // Also, update the "all" channel value to true if a single channel is enabled and it's not already enabled
     const areAllChannelsSameValue = checkHasEveryChannelSameValue(updatedUserPreferences.channels, value);
+
     if (areAllChannelsSameValue || (value && !updatedUserPreferences.all.enabled)) {
       updatedUserPreferences.all.enabled = value;
     }
@@ -175,7 +195,7 @@ export const ChannelPreferencesForm = (props: ConfigureWorkflowFormProps) => {
         exit={{ opacity: 0.1 }}
         transition={{ duration: 0.1 }}
       >
-        <SidebarHeader className="items-center border-b text-sm font-medium">
+        <SidebarHeader className="items-center border-b py-3 text-sm font-medium">
           <Link to="../" className="flex items-center">
             <CompactButton icon={RiArrowLeftSLine} variant="ghost" size="md" type="button">
               <span className="sr-only">Back</span>
@@ -198,7 +218,7 @@ export const ChannelPreferencesForm = (props: ConfigureWorkflowFormProps) => {
           <SidebarContent size="md">
             {/* This doesn't needs to be a form, but using it as a form allows to re-use the formItem designs without duplicating the same styles */}
             <Form {...overrideForm}>
-              <form>
+              <FormRoot>
                 <FormField
                   control={overrideForm.control}
                   name="override"
@@ -212,9 +232,11 @@ export const ChannelPreferencesForm = (props: ConfigureWorkflowFormProps) => {
                           checked={field.value}
                           onCheckedChange={(checked) => {
                             field.onChange(checked);
+
                             if (!checked) {
                               updateUserPreference(null);
                             }
+
                             track(TelemetryEvent.WORKFLOW_PREFERENCES_OVERRIDE_USED, {
                               new_status: checked,
                             });
@@ -224,24 +246,109 @@ export const ChannelPreferencesForm = (props: ConfigureWorkflowFormProps) => {
                     </FormItem>
                   )}
                 />
-              </form>
+              </FormRoot>
             </Form>
           </SidebarContent>
         )}
         <Separator />
         <Form {...form}>
-          <form>
+          <FormRoot>
             <SidebarContent size="md">
               <FormField
                 control={form.control}
                 name="user.all.readOnly"
                 render={({ field }) => (
-                  <FormItem className="my-2 flex w-full items-center justify-between">
+                  <FormItem className="flex w-full items-center justify-between">
                     <FormLabel tooltip="Critical workflows ensure essential notifications can't be unsubscribed.">
-                      Mark as critical
+                      Critical workflow
                     </FormLabel>
                     <FormControl>
-                      <Switch checked={field.value} onCheckedChange={handleCriticalToggle} disabled={!override} />
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={handleCriticalToggle}
+                        disabled={!override || isReadOnly}
+                      />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="severity"
+                render={({ field }) => (
+                  <FormItem className="flex flex-col w-full">
+                    <FormLabel
+                      tooltipSide="left"
+                      tooltip={
+                        <div>
+                          <Badge variant="lighter" color="yellow" size="sm" className="py-[2px] text-[8px]">
+                            📝 NOTE
+                          </Badge>
+                          <div className="mt-2 flex flex-col gap-2">
+                            <div>
+                              <span className="text-text-soft text-2xs">What it is:</span>
+                              <ul className="text-text-sub text-2xs list-disc pl-4">
+                                <li>
+                                  Severity is a way to classify the importance of a notification — from high-priority to
+                                  low-priority messages.
+                                </li>
+                              </ul>
+                            </div>
+                            <div>
+                              <span className="text-text-soft text-2xs">Why it matters:</span>
+                              <ul className="text-text-sub text-2xs list-disc pl-4">
+                                <li>
+                                  {
+                                    'Helps your subscribers spot what’s urgent. Affects color coding, ordering, and behavior in <Inbox />.'
+                                  }
+                                </li>
+                              </ul>
+                            </div>
+                            <span className="text-text-sub text-2xs">
+                              This value is stored in the Workflow Properties and exposed via the Data Object.{' '}
+                              <Link
+                                to="https://docs.novu.co/platform/concepts/workflows"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                              >
+                                Learn more ↗
+                              </Link>
+                            </span>
+                          </div>
+                        </div>
+                      }
+                      tooltipContentClassName="bg-background max-w-64 rounded-lg shadow-md"
+                    >
+                      Notification severity
+                    </FormLabel>
+                    <FormControl>
+                      <Select
+                        onValueChange={(value) => {
+                          field.onChange(value as SeverityLevelEnum);
+                          update({
+                            ...workflow,
+                            severity: value as SeverityLevelEnum,
+                          });
+                        }}
+                        defaultValue={SeverityLevelEnum.NONE}
+                        disabled={isReadOnly}
+                        value={field.value || SeverityLevelEnum.NONE}
+                      >
+                        <SelectTrigger size="2xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent
+                          onBlur={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                          }}
+                        >
+                          <SeveritySelectItem severity={SeverityLevelEnum.HIGH} />
+                          <SeveritySelectItem severity={SeverityLevelEnum.MEDIUM} />
+                          <SeveritySelectItem severity={SeverityLevelEnum.LOW} />
+                          <SeveritySelectItem severity={SeverityLevelEnum.NONE} />
+                        </SelectContent>
+                      </Select>
                     </FormControl>
                   </FormItem>
                 )}
@@ -257,7 +364,7 @@ export const ChannelPreferencesForm = (props: ConfigureWorkflowFormProps) => {
                     <Checkbox
                       checked={field.value}
                       onCheckedChange={handleAllToggle}
-                      disabled={!override || formDataToRender?.channelsInUse.length === 0}
+                      disabled={!override || isReadOnly || formDataToRender?.channelsInUse.length === 0}
                     />
                   </FormControl>
                 )}
@@ -290,7 +397,7 @@ export const ChannelPreferencesForm = (props: ConfigureWorkflowFormProps) => {
                             <Switch
                               checked={field.value}
                               onCheckedChange={(checked) => handleChannelToggle(channel as ChannelTypeEnum, checked)}
-                              disabled={!override}
+                              disabled={!override || isReadOnly}
                             />
                           </FormControl>
                         </FormItem>
@@ -345,14 +452,14 @@ export const ChannelPreferencesForm = (props: ConfigureWorkflowFormProps) => {
               })}
             </SidebarContent>
             <Separator />
-          </form>
+          </FormRoot>
         </Form>
         {!isDashboardWorkflow && override && (
           <SidebarContent size="md">
             <Card className="bg-information/10 border-information/40 border px-2.5 py-2">
               <CardContent className="flex flex-nowrap items-center gap-2 p-0">
                 <div className="size-5">
-                  <RiInformationFill className="text-information m-0.5 size-4" />
+                  <RiInformationFill className="text-information m-0.5 size-3" />
                 </div>
                 <span className="text-2xs">
                   Preferences defined in code have been overridden. Disable overrides to restore original.

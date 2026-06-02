@@ -1,11 +1,12 @@
-import { createStep } from '@/components/workflow-editor/step-utils';
+import { EnvironmentTypeEnum, PermissionsEnum, ResourceOriginEnum } from '@novu/shared';
+import { Edge, EdgeLabelRenderer, EdgeProps, getBezierPath } from '@xyflow/react';
+import { RiInsertRowTop } from 'react-icons/ri';
 import { useWorkflow } from '@/components/workflow-editor/workflow-provider';
-import { TEMPLATE_CONFIGURABLE_STEP_TYPES } from '@/utils/constants';
-import { buildRoute, ROUTES } from '@/utils/routes';
-import { WorkflowOriginEnum } from '@novu/shared';
-import { BaseEdge, Edge, EdgeLabelRenderer, EdgeProps, getBezierPath } from '@xyflow/react';
-import { useNavigate } from 'react-router-dom';
+import { useEnvironment } from '@/context/environment/hooks';
+import { useHasPermission } from '@/hooks/use-has-permission';
 import { AddStepMenu } from './add-step-menu';
+import { NODE_WIDTH } from './base-node';
+import { useCanvasContext } from './drag-context';
 
 export type AddNodeEdgeType = Edge<{ isLast: boolean; addStepIndex: number }>;
 
@@ -19,10 +20,20 @@ export function AddNodeEdge({
   style = {},
   data = { isLast: false, addStepIndex: 0 },
   markerEnd,
+  id,
 }: EdgeProps<AddNodeEdgeType>) {
-  const { workflow, update } = useWorkflow();
-  const navigate = useNavigate();
-  const isReadOnly = workflow?.origin === WorkflowOriginEnum.EXTERNAL;
+  const { workflow } = useWorkflow();
+  const has = useHasPermission();
+  const { currentEnvironment } = useEnvironment();
+  const { intersectingEdgeId, draggedNodeId, addNode } = useCanvasContext();
+  const isAnyNodeDragging = draggedNodeId !== null;
+
+  const isReadOnly =
+    workflow?.origin === ResourceOriginEnum.EXTERNAL ||
+    !has({ permission: PermissionsEnum.WORKFLOW_WRITE }) ||
+    currentEnvironment?.type !== EnvironmentTypeEnum.DEV;
+
+  const isIntersecting = intersectingEdgeId === id;
 
   const [edgePath, labelX, labelY] = getBezierPath({
     sourceX,
@@ -35,9 +46,41 @@ export function AddNodeEdge({
 
   return (
     <>
-      <BaseEdge path={edgePath} markerEnd={markerEnd} style={style} />
+      <path
+        markerEnd={markerEnd}
+        style={style}
+        d={edgePath}
+        fill="none"
+        className="react-flow__edge-path color-neutral-alpha-200"
+      />
+      <path
+        d={edgePath}
+        fill="none"
+        strokeOpacity={0}
+        strokeWidth={20}
+        className="react-flow__edge-interaction color-neutral-alpha-200"
+      />
       {!data.isLast && (
         <EdgeLabelRenderer>
+          <div
+            className="bg-background rounded-lg border border-dashed border-bg-soft flex items-center justify-center gap-1"
+            style={{
+              position: 'absolute',
+              transition: 'opacity 0.2s ease-in-out',
+              transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
+              fontSize: 12,
+              // everything inside EdgeLabelRenderer has no pointer events by default
+              // if you have an interactive element, set pointer-events: all
+              pointerEvents: 'all',
+              width: NODE_WIDTH,
+              height: 32,
+              opacity: isIntersecting ? 1 : 0,
+            }}
+            data-droppable-edge-id={id}
+          >
+            <RiInsertRowTop className="size-3.5 text-text-soft" />
+            <span className="text-label-xs text-text-soft">Drop here</span>
+          </div>
           <div
             style={{
               position: 'absolute',
@@ -49,41 +92,8 @@ export function AddNodeEdge({
             }}
             className="nodrag nopan"
           >
-            {!isReadOnly && (
-              <AddStepMenu
-                onMenuItemClick={async (stepType) => {
-                  if (workflow) {
-                    const indexToAdd = data.addStepIndex;
-
-                    const newStep = createStep(stepType);
-
-                    const updatedSteps = [
-                      ...workflow.steps.slice(0, indexToAdd),
-                      newStep,
-                      ...workflow.steps.slice(indexToAdd),
-                    ];
-
-                    update(
-                      {
-                        ...workflow,
-                        steps: updatedSteps,
-                      },
-                      {
-                        onSuccess: (data) => {
-                          if (TEMPLATE_CONFIGURABLE_STEP_TYPES.includes(stepType)) {
-                            navigate(
-                              buildRoute(ROUTES.EDIT_STEP_TEMPLATE, {
-                                workflowSlug: workflow.slug,
-                                stepSlug: data.steps[indexToAdd].slug,
-                              })
-                            );
-                          }
-                        },
-                      }
-                    );
-                  }
-                }}
-              />
+            {!isReadOnly && !isAnyNodeDragging && (
+              <AddStepMenu onMenuItemClick={(selection) => addNode(data.addStepIndex, selection)} />
             )}
           </div>
         </EdgeLabelRenderer>
@@ -91,3 +101,20 @@ export function AddNodeEdge({
     </>
   );
 }
+
+export const DefaultEdge = ({ sourceX, sourceY, targetX, targetY, style }: EdgeProps) => {
+  const edgePath = `M ${sourceX} ${sourceY} L ${targetX} ${targetY}`;
+
+  return (
+    <>
+      <path style={style} d={edgePath} fill="none" className="react-flow__edge-path color-neutral-alpha-200" />
+      <path
+        d={edgePath}
+        fill="none"
+        strokeOpacity={0}
+        strokeWidth={20}
+        className="react-flow__edge-interaction color-neutral-alpha-200"
+      />
+    </>
+  );
+};

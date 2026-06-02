@@ -1,9 +1,9 @@
-import { MemberEntity, CommunityMemberRepository } from '@novu/dal';
-import { UserSession } from '@novu/testing';
+import { CommunityMemberRepository, MemberEntity } from '@novu/dal';
 import { MemberStatusEnum } from '@novu/shared';
+import { UserSession } from '@novu/testing';
 import { expect } from 'chai';
 
-describe('Accept invite - /invites/:inviteToken/accept (POST) #novu-v1-os', async () => {
+describe('Accept invite - /invites/:inviteToken/accept (POST) #novu-v0-os', async () => {
   let session: UserSession;
   let invitedUserSession: UserSession;
   const memberRepository = new CommunityMemberRepository();

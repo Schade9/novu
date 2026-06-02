@@ -1,32 +1,36 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import {
+  BuildStepIssuesUsecase,
+  BuildVariableSchemaUsecase,
   CreateChange,
   CreateMessageTemplate,
-  CreateWorkflow,
+  CreateVariablesObject,
+  CreateWorkflowV0,
   DeleteMessageTemplate,
-  DeleteWorkflowUseCase,
+  DeletePreferencesUseCase,
   GetPreferences,
   GetWorkflowByIdsUseCase,
+  GetWorkflowWithPreferencesUseCase,
+  ResourceValidatorService,
+  TierRestrictionsValidateUsecase,
   UpdateChange,
   UpdateMessageTemplate,
-  UpdateWorkflow,
+  UpdateWorkflowV0,
   UpsertControlValuesUseCase,
   UpsertPreferences,
-  DeletePreferencesUseCase,
-  TierRestrictionsValidateUsecase,
 } from '@novu/application-generic';
 import { CommunityOrganizationRepository, PreferencesRepository } from '@novu/dal';
+import { OutboundWebhooksModule } from '../outbound-webhooks/outbound-webhooks.module';
 import { SharedModule } from '../shared/shared.module';
+import { DeleteWorkflowUseCase } from '../workflows-v1/usecases/delete-workflow/delete-workflow.usecase';
 import { BridgeController } from './bridge.controller';
 import { USECASES } from './usecases';
-import { BuildVariableSchemaUsecase } from '../workflows-v2/usecases/build-variable-schema';
-import { ExtractVariables } from '../workflows-v2/usecases/extract-variables/extract-variables.usecase';
-import { BuildStepIssuesUsecase } from '../workflows-v2/usecases/build-step-issues/build-step-issues.usecase';
 
 const PROVIDERS = [
-  CreateWorkflow,
-  UpdateWorkflow,
+  CreateWorkflowV0,
+  UpdateWorkflowV0,
   GetWorkflowByIdsUseCase,
+  GetWorkflowWithPreferencesUseCase,
   DeleteWorkflowUseCase,
   UpsertControlValuesUseCase,
   CreateMessageTemplate,
@@ -40,14 +44,17 @@ const PROVIDERS = [
   DeletePreferencesUseCase,
   UpsertControlValuesUseCase,
   BuildVariableSchemaUsecase,
-  TierRestrictionsValidateUsecase,
   CommunityOrganizationRepository,
-  ExtractVariables,
+  CreateVariablesObject,
   BuildStepIssuesUsecase,
+  ResourceValidatorService,
+  TierRestrictionsValidateUsecase,
 ];
 
+const MODULES = [SharedModule, OutboundWebhooksModule.forRoot()];
+
 @Module({
-  imports: [SharedModule],
+  imports: MODULES,
   providers: [...PROVIDERS, ...USECASES],
   controllers: [BridgeController],
   exports: [...USECASES],

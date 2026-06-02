@@ -1,7 +1,8 @@
-import { cn } from '@/utils/ui';
+import { DirectionEnum } from '@novu/shared';
 import { cva } from 'class-variance-authority';
 import * as React from 'react';
 import { RiArrowDownSFill, RiArrowUpSFill, RiExpandUpDownFill } from 'react-icons/ri';
+import { cn } from '@/utils/ui';
 
 interface TableProps extends React.HTMLAttributes<HTMLTableElement> {
   containerClassname?: string;
@@ -10,9 +11,10 @@ interface TableProps extends React.HTMLAttributes<HTMLTableElement> {
   loadingRow?: React.ReactNode;
 }
 
+export type TableHeadSortDirection = DirectionEnum | false;
 interface TableHeadProps extends React.ThHTMLAttributes<HTMLTableCellElement> {
   sortable?: boolean;
-  sortDirection?: 'asc' | 'desc' | false;
+  sortDirection?: TableHeadSortDirection;
   onSort?: () => void;
 }
 
@@ -34,7 +36,7 @@ const Table = React.forwardRef<HTMLTableElement, TableProps>(
   ({ className, containerClassname, isLoading, loadingRowsCount = 5, loadingRow, children, ...props }, ref) => (
     <div
       className={cn(
-        'border-neutral-alpha-200 relative w-full overflow-x-auto rounded-md border shadow-sm',
+        'border-neutral-alpha-200 shadow-xs relative w-full overflow-x-auto rounded-lg border',
         containerClassname
       )}
     >
@@ -60,7 +62,7 @@ Table.displayName = 'Table';
 const TableHeader = React.forwardRef<HTMLTableSectionElement, TableHeaderProps>(({ className, ...props }, ref) => (
   <thead
     ref={ref}
-    className={cn('sticky top-0 bg-neutral-50 shadow-[0_0_0_1px_hsl(var(--neutral-alpha-200))]', className)}
+    className={cn('sticky top-0 z-10 bg-neutral-50 shadow-[0_0_0_1px_hsl(var(--neutral-alpha-200))]', className)}
     {...props}
   />
 ));
@@ -73,8 +75,8 @@ const TableHead = React.forwardRef<HTMLTableCellElement, TableHeadProps>(
         {children}
         {sortable && (
           <>
-            {sortDirection === 'asc' && <RiArrowUpSFill className="text-text-sub-600 size-4" />}
-            {sortDirection === 'desc' && <RiArrowDownSFill className="text-text-sub-600 size-4" />}
+            {sortDirection === DirectionEnum.ASC && <RiArrowUpSFill className="text-text-sub-600 size-4" />}
+            {sortDirection === DirectionEnum.DESC && <RiArrowDownSFill className="text-text-sub-600 size-4" />}
             {!sortDirection && <RiExpandUpDownFill className="text-text-sub-600 size-4" />}
           </>
         )}
@@ -85,7 +87,7 @@ const TableHead = React.forwardRef<HTMLTableCellElement, TableHeadProps>(
       <th
         ref={ref}
         className={cn(
-          'text-foreground-600 h-10 px-6 py-2 text-left align-middle font-medium [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]',
+          'text-foreground-600 h-10 px-6 py-2 text-left align-middle font-medium [&:has([role=checkbox])]:pr-0 *:[[role=checkbox]]:translate-y-[2px]',
           className
         )}
         {...props}
@@ -120,7 +122,7 @@ TableFooter.displayName = 'TableFooter';
 const TableRow = React.forwardRef<HTMLTableRowElement, TableRowProps>(({ className, ...props }, ref) => (
   <tr
     ref={ref}
-    className={cn('[&>td]:border-neutral-alpha-100 [&>td]:border-b [&>td]:last-of-type:border-0', className)}
+    className={cn('[&>td]:border-neutral-alpha-100 [&>td]:border-b last-of-type:[&>td]:border-0', className)}
     {...props}
   />
 ));

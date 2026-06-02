@@ -1,12 +1,32 @@
-import type { UpdateExternalOrganizationDto, IEnvironment } from '@novu/shared';
-import { post } from './api.client';
+import type { IEnvironment } from '@novu/shared';
+import { get, patch } from './api.client';
 
-export function updateClerkOrgMetadata({
+export type GetOrganizationSettingsDto = {
+  removeNovuBranding: boolean;
+  defaultLocale: string;
+  targetLocales: string[];
+};
+
+export type UpdateOrganizationSettingsDto = {
+  removeNovuBranding?: boolean;
+  defaultLocale?: string;
+  targetLocales?: string[];
+};
+
+export async function getOrganizationSettings({
+  environment,
+}: {
+  environment: IEnvironment;
+}): Promise<{ data: GetOrganizationSettingsDto }> {
+  return get('/organizations/settings', { environment });
+}
+
+export async function updateOrganizationSettings({
   data,
   environment,
 }: {
-  data: UpdateExternalOrganizationDto;
+  data: UpdateOrganizationSettingsDto;
   environment: IEnvironment;
-}) {
-  return post('/clerk/organization', { environment, body: data });
+}): Promise<{ data: GetOrganizationSettingsDto }> {
+  return patch('/organizations/settings', { environment, body: data });
 }

@@ -1,5 +1,4 @@
 import mongoose, { Schema } from 'mongoose';
-
 import { schemaOptions } from '../schema-default.options';
 import { JobDBModel, JobStatusEnum } from './job.entity';
 
@@ -12,6 +11,16 @@ const jobSchema = new Schema<JobDBModel>(
       type: Schema.Types.String,
       default: JobStatusEnum.PENDING,
     },
+    deliveryLifecycleState: {
+      type: {
+        status: {
+          type: Schema.Types.String,
+        },
+        detail: {
+          type: Schema.Types.String,
+        },
+      },
+    },
     payload: {
       type: Schema.Types.Mixed,
     },
@@ -20,6 +29,10 @@ const jobSchema = new Schema<JobDBModel>(
     },
     tenant: {
       type: Schema.Types.Mixed,
+    },
+    contextKeys: {
+      type: [Schema.Types.String],
+      default: undefined,
     },
     step: {
       type: Schema.Types.Mixed,
@@ -101,6 +114,9 @@ const jobSchema = new Schema<JobDBModel>(
         cronExpression: {
           type: Schema.Types.String,
         },
+        untilDate: {
+          type: Schema.Types.String,
+        },
         atTime: {
           type: Schema.Types.String,
         },
@@ -132,6 +148,9 @@ const jobSchema = new Schema<JobDBModel>(
     },
     stepOutput: Schema.Types.Mixed,
     preferences: Schema.Types.Mixed,
+    scheduleExtensionsCount: {
+      type: Schema.Types.Number,
+    },
   },
   schemaOptions
 );
@@ -399,5 +418,28 @@ jobSchema.index(
  * This index was created to push entries to Online Archive
  */
 jobSchema.index({ createdAt: 1 });
+
+jobSchema.index(
+  {
+    subscriberId: 1,
+    _environmentId: 1,
+    'digest.digestValue': 1,
+    'digest.digestKey': 1,
+    _templateId: 1,
+    status: 1,
+    type: 1,
+  },
+  {
+    name: 'Guard from having two master jobs for same digest key, digest value, workflow and subscriber',
+    unique: true,
+    partialFilterExpression: {
+      status: 'delayed',
+      type: 'digest',
+      createdAt: { $gte: new Date('2025-03-05T00:00:01.505+00:00') },
+      'digest.digestValue': { $exists: true },
+      'digest.digestKey': { $exists: true },
+    },
+  }
+);
 
 export const Job = (mongoose.models.Job as mongoose.Model<JobDBModel>) || mongoose.model<JobDBModel>('Job', jobSchema);

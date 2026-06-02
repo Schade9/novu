@@ -104,6 +104,14 @@ export const texts = {
       fontWeight: '500',
     },
   ],
+  'label-2xs': [
+    '.625rem',
+    {
+      lineHeight: '0.875rem',
+      letterSpacing: '0em',
+      fontWeight: '500',
+    },
+  ],
   'paragraph-xl': [
     '1.5rem',
     {
@@ -184,12 +192,22 @@ export const texts = {
       fontWeight: '500',
     },
   ],
-  'code-sm': [
+  'code-xs': [
     '0.75rem',
     {
       lineHeight: '1rem',
-      letterSpacing: '-0.015em',
+      letterSpacing: '-0.0125em',
       fontWeight: '500',
+      fontFamily: 'var(--font-code)',
+    },
+  ],
+  'code-2xs': [
+    '0.625rem',
+    {
+      lineHeight: '0.9375rem',
+      letterSpacing: '-0.0125em',
+      fontWeight: '400',
+      fontFamily: 'var(--font-code)',
     },
   ],
 };
@@ -198,10 +216,22 @@ export const shadows = {
   xs: '0px 1px 2px 0px rgba(10, 13, 20, 0.03)',
   sm: '0px 1px 2px 0px #1018280F,0px 1px 3px 0px #1018281A',
   md: '0px 16px 32px -12px rgba(14, 18, 27, 0.10)',
+  popover: '0 1px 3px rgba(0, 0, 0, 0.04)',
+  'box-xs': '0 0 0 1px rgba(25, 28, 33, 0.04), 0 1px 2px 0 rgba(25, 28, 33, 0.06)',
   DEFAULT: '0px 16px 32px -12px #0E121B1A',
   'button-primary-focus': ['0 0 0 2px theme(colors.bg[white])', '0 0 0 4px hsl(var(--primary-alpha-10))'],
   'button-important-focus': ['0 0 0 2px theme(colors.bg[white])', '0 0 0 4px hsl(var(--neutral-alpha-16))'],
   'button-error-focus': ['0 0 0 2px theme(colors.bg[white])', '0 0 0 4px hsl(var(--red-alpha-10))'],
+  'switch-track':
+    '0px 1px 1px 0px hsl(var(--neutral-950) / 0.04) inset, 0px 2px 4px 0px hsl(var(--neutral-950) / 0.04) inset, 0px 0px 0px 0.75px hsl(var(--neutral-950) / 0.06) inset, 0px 0px 8px 0px hsl(var(--neutral-950) / 0.02) inset, 0px 2px 4px 0px hsl(var(--neutral-950) / 0.04)',
+  'switch-track-focus':
+    '0px 0px 0px 1px hsl(var(--neutral-0)), 0px 0px 0px 3px hsl(var(--primary) / 0.6), 0px 1px 1px 0px hsl(var(--neutral-950) / 0.04) inset, 0px 2px 4px 0px hsl(var(--neutral-950) / 0.04) inset, 0px 0px 0px 0.75px hsl(var(--neutral-950) / 0.06) inset, 0px 0px 8px 0px hsl(var(--neutral-950) / 0.02) inset, 0px 2px 4px 0px hsl(var(--neutral-950) / 0.04)',
+  'switch-handle':
+    '0px 0px 2px 1px hsl(var(--neutral-0)) inset, 0px 1px 0px 0px hsl(var(--neutral-0)) inset, 0px 0px 0px 0.5px hsl(var(--neutral-950) / 0.02), 0px 5px 4px 0px hsl(var(--neutral-950) / 0.02), 0px 3px 3px 0px hsl(var(--neutral-950) / 0.04), 0px 1px 2px 0px hsl(var(--neutral-950) / 0.12), 0px 0px 1px 0px hsl(var(--neutral-950) / 0.08)',
+  'switch-track-disabled':
+    '0px 1px 1px 0px hsl(var(--neutral-950) / 0.03) inset, 0px 0px 0px 0.5px hsl(var(--neutral-950) / 0.04) inset',
+  'switch-handle-disabled':
+    '0px 0px 0px 0.5px hsl(var(--neutral-950) / 0.04), 0px 1px 2px 0px hsl(var(--neutral-950) / 0.06)',
 };
 
 export default {
@@ -454,10 +484,18 @@ export default {
         weak: 'hsl(var(--bg-weak))',
         white: 'hsl(var(--bg-white))',
       },
+      icon: {
+        strong: 'hsl(var(--icon-strong))',
+        sub: 'hsl(var(--icon-sub))',
+        soft: 'hsl(var(--icon-soft))',
+        disabled: 'hsl(var(--icon-disabled))',
+        white: 'hsl(var(--icon-white))',
+      },
       stroke: {
         strong: 'hsl(var(--stroke-strong))',
         sub: 'hsl(var(--stroke-sub))',
         soft: 'hsl(var(--stroke-soft))',
+        weak: 'hsl(var(--stroke-weak))',
         white: 'hsl(var(--stroke-white))',
       },
       text: {
@@ -580,7 +618,7 @@ export default {
     },
     extend: {
       fontFamily: {
-        code: ['JetBrains Mono', 'monospace'],
+        code: ['var(--font-code)', 'var(--font-code-fallback)'],
       },
       opacity: {
         2.5: 0.025,
@@ -628,6 +666,22 @@ export default {
             height: '0',
           },
         },
+        'collapsible-down': {
+          from: {
+            height: '0',
+          },
+          to: {
+            height: 'var(--radix-collapsible-content-height)',
+          },
+        },
+        'collapsible-up': {
+          from: {
+            height: 'var(--radix-collapsible-content-height)',
+          },
+          to: {
+            height: '0',
+          },
+        },
         swing: {
           '0%, 9.9%, 100%': { transform: 'rotate(0deg)' },
           '10%': { transform: 'rotate(3deg)' },
@@ -656,6 +710,8 @@ export default {
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
         'accordion-up': 'accordion-up 0.2s ease-out',
+        'collapsible-down': 'collapsible-down 0.2s ease-out',
+        'collapsible-up': 'collapsible-up 0.2s ease-out',
         'pulse-subtle': 'pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
         'spin-slow': 'spin-slow 3s linear infinite',
         swing: 'swing 3s ease-in-out',
@@ -673,7 +729,7 @@ export default {
   },
   plugins: [
     animate,
-    function ({ addUtilities }: { addUtilities: (utilities: Record<string, any>) => void }) {
+    ({ addUtilities }: { addUtilities: (utilities: Record<string, any>) => void }) => {
       addUtilities({
         '.overflow-initial': { overflow: 'initial' },
         '.overflow-inherit': { overflow: 'inherit' },

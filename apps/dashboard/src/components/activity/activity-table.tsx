@@ -1,19 +1,28 @@
-import { ActivityFilters } from '@/api/activity';
-import { Skeleton } from '@/components/primitives/skeleton';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/primitives/table';
-import { TimeDisplayHoverCard } from '@/components/time-display-hover-card';
-import { cn } from '@/utils/ui';
-import { ISubscriber } from '@novu/shared';
-import { format } from 'date-fns';
+import { FeatureFlagsKeysEnum } from '@novu/shared';
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect } from 'react';
 import { createSearchParams, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { toast } from 'sonner';
+import type { ActivityFilters } from '@/api/activity';
+import { Skeleton } from '@/components/primitives/skeleton';
+import { showErrorToast } from '@/components/primitives/sonner-helpers';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableFooter,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/primitives/table';
+import { TablePaginationFooter } from '@/components/primitives/table-pagination-footer';
+import { useFeatureFlag } from '@/hooks/use-feature-flag';
+import { usePersistedPageSize } from '@/hooks/use-persisted-page-size';
+import { parsePageParam } from '@/utils/parse-page-param';
 import { useFetchActivities } from '../../hooks/use-fetch-activities';
 import { ActivityEmptyState } from './activity-empty-state';
-import { ArrowPagination } from './components/arrow-pagination';
-import { ActivityStatusBadge } from './components/status-badge';
-import { StepIndicators } from './components/step-indicators';
+import { ActivityTableRow } from './components/activity-table-row';
+
+const ACTIVITY_TABLE_ID = 'activity-table';
 
 export interface ActivityTableProps {
   selectedActivityId: string | null;
@@ -21,6 +30,9 @@ export interface ActivityTableProps {
   filters?: ActivityFilters;
   hasActiveFilters: boolean;
   onClearFilters: () => void;
+  isLoading?: boolean;
+  onTriggerWorkflow?: () => void;
+  onListStateChange?: (hasActivities: boolean) => void;
 }
 
 export function ActivityTable({
@@ -29,35 +41,96 @@ export function ActivityTable({
   filters,
   hasActiveFilters,
   onClearFilters,
+  onTriggerWorkflow,
+  onListStateChange,
 }: ActivityTableProps) {
   const [searchParams] = useSearchParams();
   const location = useLocation();
   const navigate = useNavigate();
+  const isWorkflowRunMigrationEnabled = useFeatureFlag(FeatureFlagsKeysEnum.IS_WORKFLOW_RUN_PAGE_MIGRATION_ENABLED);
+  const { pageSize, setPageSize } = usePersistedPageSize({
+    tableId: ACTIVITY_TABLE_ID,
+    defaultPageSize: 10,
+  });
+
+  // Get pagination parameters from URL
   const page = parsePageParam(searchParams.get('page'));
-  const { activities, isLoading, hasMore, error } = useFetchActivities(
+  const cursor = searchParams.get('cursor');
+
+  const { activities, isLoading, hasMore, next, previous, error } = useFetchActivities(
     {
       filters,
-      page,
+      page: isWorkflowRunMigrationEnabled ? undefined : page,
+      cursor: isWorkflowRunMigrationEnabled ? cursor : undefined,
+      limit: pageSize,
     },
     {
-      refetchOnWindowFocus: true,
+      refetchOnWindowFocus: false,
     }
   );
 
   useEffect(() => {
     if (error) {
-      toast.error('Failed to fetch activities', {
-        description: error instanceof Error ? error.message : 'There was an error loading the activities.',
-      });
+      showErrorToast(
+        error instanceof Error ? error.message : 'There was an error loading the activities.',
+        'Failed to fetch activities'
+      );
     }
   }, [error]);
+
+  useEffect(() => {
+    onListStateChange?.(!isLoading && activities.length > 0);
+  }, [isLoading, activities.length, onListStateChange]);
 
   function handlePageChange(newPage: number) {
     const newParams = createSearchParams({
       ...Object.fromEntries(searchParams),
       page: newPage.toString(),
     });
+    // Remove cursor when using page-based pagination
+    newParams.delete('cursor');
     navigate(`${location.pathname}?${newParams}`);
+  }
+
+  function handleCursorNavigation(newCursor: string | null, action: 'next' | 'previous' | 'first') {
+    const newParams = createSearchParams({
+      ...Object.fromEntries(searchParams),
+    });
+
+    // Remove page when using cursor-based pagination
+    newParams.delete('page');
+
+    if (action === 'first') {
+      // Go to first page by removing cursor
+      newParams.delete('cursor');
+    } else if (newCursor) {
+      newParams.set('cursor', newCursor);
+    } else {
+      newParams.delete('cursor');
+    }
+
+    navigate(`${location.pathname}?${newParams}`);
+  }
+
+  function handleNext() {
+    if (next) {
+      handleCursorNavigation(next, 'next');
+    }
+  }
+
+  function handlePrevious() {
+    if (previous) {
+      handleCursorNavigation(previous, 'previous');
+    }
+  }
+
+  function handlePageSizeChange(newPageSize: number) {
+    setPageSize(newPageSize);
+    if (isWorkflowRunMigrationEnabled) {
+      handleCursorNavigation(null, 'first');
+    } else {
+      handlePageChange(0);
+    }
   }
 
   return (
@@ -71,7 +144,12 @@ export function ActivityTable({
           transition={{ duration: 0.2 }}
           className="flex h-full w-full items-center justify-center"
         >
-          <ActivityEmptyState emptySearchResults={hasActiveFilters} onClearFilters={onClearFilters} />
+          <ActivityEmptyState
+            filters={filters}
+            emptySearchResults={hasActiveFilters}
+            onClearFilters={onClearFilters}
+            onTriggerWorkflow={onTriggerWorkflow}
+          />
         </motion.div>
       ) : (
         <motion.div
@@ -80,70 +158,54 @@ export function ActivityTable({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.2 }}
-          className="flex min-h-full min-w-[800px] flex-1 flex-col"
+          className="flex flex-1 flex-col h-full"
         >
           <Table
             isLoading={isLoading}
             loadingRow={<SkeletonRow />}
-            containerClassname="border-x-0 border-b-0 border-t border-t-neutral-200 rounded-none shadow-none"
+            containerClassname="bg-transparent w-full flex flex-col overflow-y-auto overflow-x-hidden max-h-full rounded-lg border border-neutral-200 bg-white"
           >
-            <TableHeader className="shadow-none">
-              <TableRow className="border-b border-neutral-200 shadow-none [&>th]:border-b [&>th]:border-neutral-200">
-                <TableHead className="h-9 px-3 py-0">Event</TableHead>
-                <TableHead className="h-9 px-3 py-0">Status</TableHead>
-                <TableHead className="h-9 px-3 py-0">Steps</TableHead>
-                <TableHead className="h-9 px-3 py-0">Triggered At</TableHead>
+            <TableHeader>
+              <TableRow className="bg-bg-weak [&>th]:bg-bg-weak [&>th:last-child]:relative [&>th:last-child]:after:absolute [&>th:last-child]:after:left-full [&>th:last-child]:after:top-0 [&>th:last-child]:after:bottom-0 [&>th:last-child]:after:w-[100vw] [&>th:last-child]:after:bg-bg-weak [&>th:last-child]:after:content-[''] [&>th:last-child]:after:-z-10">
+                <TableHead className="text-text-strong h-8 px-2 py-0">Workflow runs</TableHead>
+                <TableHead className="h-8 w-[175px] px-2 py-0"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {activities.map((activity) => (
-                <TableRow
+                <ActivityTableRow
                   key={activity._id}
-                  className={cn(
-                    'relative cursor-pointer hover:bg-neutral-50',
-                    selectedActivityId === activity._id &&
-                      'bg-neutral-50 after:absolute after:right-0 after:top-0 after:h-[calc(100%-1px)] after:w-[5px] after:bg-neutral-200'
-                  )}
-                  onClick={() => onActivitySelect(activity._id)}
-                >
-                  <TableCell className="px-3">
-                    <div className="flex flex-col">
-                      <span className="text-foreground-950 font-medium">
-                        {activity.template?.name || 'Deleted workflow'}
-                      </span>
-                      <span className="text-foreground-400 text-[10px] leading-[14px]">
-                        {activity.transactionId}{' '}
-                        {getSubscriberDisplay(
-                          activity.subscriber as Pick<ISubscriber, '_id' | 'subscriberId' | 'firstName' | 'lastName'>
-                        )}
-                      </span>
-                    </div>
-                  </TableCell>
-                  <TableCell className="px-3">
-                    <ActivityStatusBadge jobs={activity.jobs} />
-                  </TableCell>
-                  <TableCell className="px-3">
-                    <StepIndicators jobs={activity.jobs} />
-                  </TableCell>
-                  <TableCell className="text-foreground-600 px-3">
-                    <TimeDisplayHoverCard date={new Date(activity.createdAt)}>
-                      <span>{formatDate(activity.createdAt)}</span>
-                    </TimeDisplayHoverCard>
-                  </TableCell>
-                </TableRow>
+                  activity={activity}
+                  isSelected={selectedActivityId === activity._id}
+                  onClick={onActivitySelect}
+                />
               ))}
             </TableBody>
+            <TableFooter className="border-t border-t-neutral-200">
+              <TableRow>
+                <TableCell colSpan={7} className="p-0">
+                  <TablePaginationFooter
+                    pageSize={pageSize}
+                    currentPageItemsCount={activities.length}
+                    onPreviousPage={
+                      isWorkflowRunMigrationEnabled ? handlePrevious : () => handlePageChange(Math.max(0, page - 1))
+                    }
+                    onNextPage={isWorkflowRunMigrationEnabled ? handleNext : () => handlePageChange(page + 1)}
+                    onPageSizeChange={handlePageSizeChange}
+                    hasPreviousPage={isWorkflowRunMigrationEnabled ? !!previous : page > 0}
+                    hasNextPage={hasMore}
+                    className="bg-transparent shadow-none"
+                    itemName="workflow runs"
+                    pageSizeOptions={[10, 20, 50]}
+                  />
+                </TableCell>
+              </TableRow>
+            </TableFooter>
           </Table>
-
-          <ArrowPagination page={page} hasMore={hasMore} onPageChange={handlePageChange} />
         </motion.div>
       )}
     </AnimatePresence>
   );
-}
-
-function formatDate(date: string) {
-  return format(new Date(date), 'MMM d yyyy, HH:mm:ss');
 }
 
 function SkeletonRow() {
@@ -175,21 +237,4 @@ function SkeletonRow() {
       </TableCell>
     </TableRow>
   );
-}
-
-function getSubscriberDisplay(subscriber?: Pick<ISubscriber, '_id' | 'subscriberId' | 'firstName' | 'lastName'>) {
-  if (!subscriber) return '';
-
-  if (subscriber.firstName || subscriber.lastName) {
-    return `• ${subscriber.firstName || ''} ${subscriber.lastName || ''}`;
-  }
-
-  return '';
-}
-function parsePageParam(param: string | null): number {
-  if (!param) return 0;
-
-  const parsed = Number.parseInt(param, 10);
-
-  return Math.max(0, parsed || 0);
 }

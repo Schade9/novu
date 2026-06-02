@@ -1,26 +1,30 @@
+import { ChannelTypeEnum, providers as novuProviders, PermissionsEnum } from '@novu/shared';
+import { useEffect, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { Button } from '@/components/primitives/button';
 import { useFetchIntegrations } from '@/hooks/use-fetch-integrations';
+import { useHasPermission } from '@/hooks/use-has-permission';
 import { useSetPrimaryIntegration } from '@/hooks/use-set-primary-integration';
 import { useUpdateIntegration } from '@/hooks/use-update-integration';
-import { ChannelTypeEnum, providers as novuProviders } from '@novu/shared';
-import { useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
 import { showSuccessToast } from '../../../components/primitives/sonner-helpers';
 import { useDeleteIntegration } from '../../../hooks/use-delete-integration';
 import { ROUTES } from '../../../utils/routes';
+import { UnsavedChangesAlertDialog } from '../../unsaved-changes-alert-dialog';
 import { IntegrationFormData } from '../types';
 import { useIntegrationPrimaryModal } from './hooks/use-integration-primary-modal';
-import { IntegrationConfiguration } from './integration-configuration';
+import { IntegrationSettings } from './integration-settings';
 import { IntegrationSheet } from './integration-sheet';
 import { DeleteIntegrationModal } from './modals/delete-integration-modal';
 import { SelectPrimaryIntegrationModal } from './modals/select-primary-integration-modal';
 import { handleIntegrationError } from './utils/handle-integration-error';
+import { cleanCredentials, isDemoIntegration } from './utils/helpers';
 
 type UpdateIntegrationSidebarProps = {
   isOpened: boolean;
 };
 
 export function UpdateIntegrationSidebar({ isOpened }: UpdateIntegrationSidebarProps) {
+  const has = useHasPermission();
   const navigate = useNavigate();
   const { integrationId } = useParams();
   const { integrations } = useFetchIntegrations();
@@ -31,6 +35,9 @@ export function UpdateIntegrationSidebar({ isOpened }: UpdateIntegrationSidebarP
   const { mutateAsync: updateIntegration, isPending: isUpdating } = useUpdateIntegration();
   const { mutateAsync: setPrimaryIntegration, isPending: isSettingPrimary } = useSetPrimaryIntegration();
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [formState, setFormState] = useState({ isValid: true, errors: {} as Record<string, unknown>, isDirty: false });
+  const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
+  const [isSheetOpen, setIsSheetOpen] = useState(isOpened);
 
   const {
     isPrimaryModalOpen,
@@ -50,6 +57,8 @@ export function UpdateIntegrationSidebar({ isOpened }: UpdateIntegrationSidebarP
     mode: 'update',
     setPrimaryIntegration: setPrimaryIntegration,
   });
+
+  const isReadOnly = !has({ permission: PermissionsEnum.INTEGRATION_WRITE });
 
   async function onSubmit(data: IntegrationFormData, skipPrimaryCheck?: boolean) {
     if (!integration) return;
@@ -79,8 +88,9 @@ export function UpdateIntegrationSidebar({ isOpened }: UpdateIntegrationSidebarP
           identifier: data.identifier,
           active: data.active,
           primary: data.primary,
-          credentials: data.credentials,
+          credentials: cleanCredentials(data.credentials),
           check: data.check,
+          configurations: data.configurations,
         },
       });
 
@@ -90,6 +100,7 @@ export function UpdateIntegrationSidebar({ isOpened }: UpdateIntegrationSidebarP
 
       showSuccessToast('Integration updated successfully');
 
+      setIsSheetOpen(false);
       navigate(ROUTES.INTEGRATIONS);
     } catch (error: unknown) {
       handleIntegrationError(error, 'update');
@@ -108,46 +119,84 @@ export function UpdateIntegrationSidebar({ isOpened }: UpdateIntegrationSidebarP
 
       showSuccessToast('Integration deleted successfully');
       setIsDeleteDialogOpen(false);
+      setIsSheetOpen(false);
       navigate(ROUTES.INTEGRATIONS);
     } catch (error: unknown) {
       handleIntegrationError(error, 'delete');
     }
   };
 
+  // Sync sheet open state with isOpened prop
+  useEffect(() => {
+    setIsSheetOpen(isOpened);
+  }, [isOpened]);
+
   const handleClose = () => {
+    if (formState.isDirty && !isUpdating && !isSettingPrimary && !isDeleting) {
+      setShowUnsavedDialog(true);
+
+      return;
+    }
+
+    setIsSheetOpen(false);
     navigate(ROUTES.INTEGRATIONS);
+  };
+
+  const handleProceedClose = () => {
+    setShowUnsavedDialog(false);
+    setIsSheetOpen(false);
+    navigate(ROUTES.INTEGRATIONS);
+  };
+
+  const handleCancelClose = () => {
+    setShowUnsavedDialog(false);
   };
 
   if (!integration || !provider) return null;
 
+  const isIntegrationDeletionAllowed =
+    !isDemoIntegration(integration?.providerId) && integration?.channel !== ChannelTypeEnum.IN_APP && !isReadOnly;
+
   return (
     <>
-      <IntegrationSheet isOpened={isOpened} onClose={handleClose} provider={provider} mode="update">
+      <IntegrationSheet isOpened={isSheetOpen} onClose={handleClose} provider={provider} mode="update">
         <div className="scrollbar-custom flex-1 overflow-y-auto">
-          <IntegrationConfiguration
+          <IntegrationSettings
             isChannelSupportPrimary={isChannelSupportPrimary}
             provider={provider}
             integration={integration}
             onSubmit={handleSubmitWithPrimaryCheck}
             mode="update"
             hasOtherProviders={!!hasOtherProviders}
+            isReadOnly={isReadOnly}
+            onFormStateChange={setFormState}
           />
         </div>
 
         <div className="bg-background flex justify-between gap-2 border-t p-3">
-          {integration.channel !== ChannelTypeEnum.IN_APP && (
-            <Button variant="error" mode="ghost" isLoading={isDeleting} onClick={() => setIsDeleteDialogOpen(true)}>
+          {isIntegrationDeletionAllowed && (
+            <Button
+              variant="error"
+              mode="ghost"
+              isLoading={isDeleting}
+              disabled={isReadOnly}
+              onClick={() => setIsDeleteDialogOpen(true)}
+            >
               Delete Integration
             </Button>
           )}
-          <Button
-            type="submit"
-            form="integration-configuration-form"
-            className="ml-auto"
-            isLoading={isUpdating || isSettingPrimary}
-          >
-            Save Changes
-          </Button>
+
+          {!isReadOnly && (
+            <Button
+              type="submit"
+              form={`integration-configuration-form-${provider.id}`}
+              className="ml-auto"
+              isLoading={isUpdating || isSettingPrimary}
+              disabled={isReadOnly || !formState.isValid}
+            >
+              Save Changes
+            </Button>
+          )}
         </div>
       </IntegrationSheet>
 
@@ -181,6 +230,8 @@ export function UpdateIntegrationSidebar({ isOpened }: UpdateIntegrationSidebarP
         )}
         mode={integration?.primary ? 'select' : 'switch'}
       />
+
+      <UnsavedChangesAlertDialog show={showUnsavedDialog} onCancel={handleCancelClose} onProceed={handleProceedClose} />
     </>
   );
 }

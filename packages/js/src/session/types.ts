@@ -1,5 +1,14 @@
-export type InitializeSessionArgs = {
-  applicationIdentifier: string;
-  subscriberId: string;
-  subscriberHash?: string;
-};
+import { Context, DefaultSchedule, Subscriber } from '../types';
+
+export type KeylessInitializeSessionArgs = {} & { [K in string]?: never }; // empty object,disallows all unknown keys
+
+export type InitializeSessionArgs =
+  | KeylessInitializeSessionArgs
+  | {
+      applicationIdentifier: string;
+      subscriber: Subscriber;
+      subscriberHash?: string;
+      contextHash?: string;
+      defaultSchedule?: DefaultSchedule;
+      context?: Context;
+    };

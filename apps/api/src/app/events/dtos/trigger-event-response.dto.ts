@@ -1,6 +1,7 @@
-import { IsBoolean, IsDefined, IsEnum, IsOptional, IsString } from 'class-validator';
-import { TriggerEventStatusEnum } from '@novu/shared';
 import { ApiProperty } from '@nestjs/swagger';
+import { IWorkflowDataDto } from '@novu/application-generic';
+import { TriggerEventStatusEnum } from '@novu/shared';
+import { IsBoolean, IsDefined, IsEnum, IsOptional, IsString } from 'class-validator';
 
 export class TriggerEventResponseDto {
   @ApiProperty({
@@ -29,10 +30,22 @@ export class TriggerEventResponseDto {
 
   @ApiProperty({
     description: 'The returned transaction ID of the trigger',
-    type: String, // Specify that this is a string
-    required: false, // Not required since it's optional
+    type: String,
+    required: false,
   })
   @IsOptional()
   @IsString()
   transactionId?: string;
+
+  @ApiProperty({
+    description: 'Link to the activity feed for this trigger event',
+    type: String,
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  activityFeedLink?: string;
+
+  @IsOptional()
+  jobData?: IWorkflowDataDto;
 }

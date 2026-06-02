@@ -1,28 +1,60 @@
-import { createMemo, createSignal, Match, Show, Switch } from 'solid-js';
 import { type OffsetOptions, type Placement } from '@floating-ui/dom';
+import { createMemo, createSignal, Match, Show, Switch } from 'solid-js';
 import { useInboxContext } from '../context';
-import { useStyle } from '../helpers';
+import { cn, useStyle } from '../helpers';
 import type {
+  AvatarRenderer,
   BellRenderer,
+  BodyRenderer,
+  CustomActionsRenderer,
+  DefaultActionsRenderer,
   NotificationActionClickHandler,
   NotificationClickHandler,
   NotificationRenderer,
+  SubjectRenderer,
 } from '../types';
-import { Bell, Footer, Header, Preferences, PreferencesHeader } from './elements';
+import { Bell, Footer, Header, Preferences } from './elements';
+import { PreferencesHeader } from './elements/Preferences/PreferencesHeader';
 import { InboxTabs } from './InboxTabs';
 import { NotificationList } from './Notification';
 import { Button, Popover } from './primitives';
 
+export type NotificationRendererProps = {
+  renderNotification: NotificationRenderer;
+  renderAvatar?: never;
+  renderSubject?: never;
+  renderBody?: never;
+  renderDefaultActions?: never;
+  renderCustomActions?: never;
+};
+
+export type SubjectBodyRendererProps = {
+  renderNotification?: never;
+  renderAvatar?: AvatarRenderer;
+  renderSubject?: SubjectRenderer;
+  renderBody?: BodyRenderer;
+  renderDefaultActions?: DefaultActionsRenderer;
+  renderCustomActions?: CustomActionsRenderer;
+};
+
+export type NoRendererProps = {
+  renderNotification?: undefined;
+  renderAvatar?: undefined;
+  renderSubject?: undefined;
+  renderBody?: undefined;
+  renderDefaultActions?: undefined;
+  renderCustomActions?: undefined;
+};
+
 export type InboxProps = {
   open?: boolean;
-  renderNotification?: NotificationRenderer;
   renderBell?: BellRenderer;
   onNotificationClick?: NotificationClickHandler;
   onPrimaryActionClick?: NotificationActionClickHandler;
   onSecondaryActionClick?: NotificationActionClickHandler;
   placement?: Placement;
   placementOffset?: OffsetOptions;
-};
+} & (NotificationRendererProps | SubjectBodyRendererProps | NoRendererProps);
 
 export enum InboxPage {
   Notifications = 'notifications',
@@ -30,15 +62,15 @@ export enum InboxPage {
 }
 
 export type InboxContentProps = {
-  renderNotification?: NotificationRenderer;
   onNotificationClick?: NotificationClickHandler;
   onPrimaryActionClick?: NotificationActionClickHandler;
   onSecondaryActionClick?: NotificationActionClickHandler;
   initialPage?: InboxPage;
   hideNav?: boolean;
-};
+} & (NotificationRendererProps | SubjectBodyRendererProps | NoRendererProps);
 
 export const InboxContent = (props: InboxContentProps) => {
+  const { isDevelopmentMode } = useInboxContext();
   const [currentPage, setCurrentPage] = createSignal<InboxPage>(props.initialPage || InboxPage.Notifications);
   const { tabs, filter } = useInboxContext();
   const style = useStyle();
@@ -54,7 +86,18 @@ export const InboxContent = (props: InboxContentProps) => {
   });
 
   return (
-    <div class={style('inboxContent', 'nt-h-full nt-flex nt-flex-col')}>
+    <div
+      class={style({
+        key: 'inboxContent',
+        className: cn(
+          'nt-h-full nt-flex nt-flex-col [&_.nv-preferencesContainer]:nt-pb-8 [&_.nv-notificationList]:nt-pb-8',
+          {
+            '[&_.nv-preferencesContainer]:nt-pb-12 [&_.nv-notificationList]:nt-pb-12': isDevelopmentMode(),
+            '[&_.nv-preferencesContainer]:nt-pb-8 [&_.nv-notificationList]:nt-pb-8': !isDevelopmentMode(),
+          }
+        ),
+      })}
+    >
       <Switch>
         <Match when={currentPage() === InboxPage.Notifications}>
           <Header navigateToPreferences={navigateToPage()(InboxPage.Preferences)} />
@@ -64,6 +107,11 @@ export const InboxContent = (props: InboxContentProps) => {
             fallback={
               <NotificationList
                 renderNotification={props.renderNotification}
+                renderAvatar={props.renderAvatar}
+                renderSubject={props.renderSubject}
+                renderBody={props.renderBody}
+                renderDefaultActions={props.renderDefaultActions}
+                renderCustomActions={props.renderCustomActions}
                 onNotificationClick={props.onNotificationClick}
                 onPrimaryActionClick={props.onPrimaryActionClick}
                 onSecondaryActionClick={props.onSecondaryActionClick}
@@ -73,6 +121,11 @@ export const InboxContent = (props: InboxContentProps) => {
           >
             <InboxTabs
               renderNotification={props.renderNotification}
+              renderAvatar={props.renderAvatar}
+              renderSubject={props.renderSubject}
+              renderBody={props.renderBody}
+              renderDefaultActions={props.renderDefaultActions}
+              renderCustomActions={props.renderCustomActions}
               onNotificationClick={props.onNotificationClick}
               onPrimaryActionClick={props.onPrimaryActionClick}
               onSecondaryActionClick={props.onSecondaryActionClick}
@@ -99,18 +152,34 @@ export const Inbox = (props: InboxProps) => {
     <Popover.Root open={isOpen()} onOpenChange={setIsOpened} placement={props.placement} offset={props.placementOffset}>
       <Popover.Trigger
         asChild={(triggerProps) => (
-          <Button class={style('inbox__popoverTrigger')} variant="ghost" size="icon" {...triggerProps}>
+          <Button class={style({ key: 'inbox__popoverTrigger' })} variant="ghost" size="icon" {...triggerProps}>
             <Bell renderBell={props.renderBell} />
           </Button>
         )}
       />
       <Popover.Content appearanceKey="inbox__popoverContent" portal>
-        <InboxContent
-          renderNotification={props.renderNotification}
-          onNotificationClick={props.onNotificationClick}
-          onPrimaryActionClick={props.onPrimaryActionClick}
-          onSecondaryActionClick={props.onSecondaryActionClick}
-        />
+        <Show
+          when={props.renderNotification}
+          fallback={
+            <InboxContent
+              renderAvatar={props.renderAvatar}
+              renderSubject={props.renderSubject}
+              renderBody={props.renderBody}
+              renderDefaultActions={props.renderDefaultActions}
+              renderCustomActions={props.renderCustomActions}
+              onNotificationClick={props.onNotificationClick}
+              onPrimaryActionClick={props.onPrimaryActionClick}
+              onSecondaryActionClick={props.onSecondaryActionClick}
+            />
+          }
+        >
+          <InboxContent
+            renderNotification={props.renderNotification}
+            onNotificationClick={props.onNotificationClick}
+            onPrimaryActionClick={props.onPrimaryActionClick}
+            onSecondaryActionClick={props.onSecondaryActionClick}
+          />
+        </Show>
       </Popover.Content>
     </Popover.Root>
   );

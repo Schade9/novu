@@ -1,15 +1,19 @@
 import type { MessageEntity } from '@novu/dal';
-import { ButtonTypeEnum, MessageActionStatusEnum } from '@novu/shared';
+import { ButtonTypeEnum, MessageActionStatusEnum, SeverityLevelEnum } from '@novu/shared';
 
-import type { InboxNotification, Subscriber } from './types';
+import { InboxNotificationDto, InboxSubscriberResponseDto } from '../dtos/inbox-notification.dto';
 
 const mapSingleItem = ({
   _id,
   content,
   read,
+  seen,
   archived,
+  snoozedUntil,
+  deliveredAt,
   createdAt,
   lastReadDate,
+  firstSeenDate,
   archivedAt,
   channel,
   subscriber,
@@ -17,9 +21,12 @@ const mapSingleItem = ({
   avatar,
   cta,
   tags,
+  severity,
   data,
-}: MessageEntity): InboxNotification => {
-  const to: Subscriber = {
+  template,
+  transactionId,
+}: MessageEntity): InboxNotificationDto => {
+  const to: InboxSubscriberResponseDto = {
     id: subscriber?._id ?? '',
     firstName: subscriber?.firstName,
     lastName: subscriber?.lastName,
@@ -33,13 +40,23 @@ const mapSingleItem = ({
 
   return {
     id: _id,
+    transactionId,
     subject,
     body: content as string,
     to,
     isRead: read,
+    isSeen: seen,
     isArchived: archived,
+    isSnoozed: !!snoozedUntil,
+    ...(deliveredAt && {
+      deliveredAt,
+    }),
+    ...(snoozedUntil && {
+      snoozedUntil,
+    }),
     createdAt,
     readAt: lastReadDate,
+    firstSeenAt: firstSeenDate,
     archivedAt,
     avatar,
     primaryAction: primaryCta && {
@@ -64,6 +81,7 @@ const mapSingleItem = ({
     },
     channelType: channel,
     tags,
+    severity: severity ?? SeverityLevelEnum.NONE,
     redirect: cta.data?.url
       ? {
           url: cta.data.url,
@@ -71,6 +89,16 @@ const mapSingleItem = ({
         }
       : undefined,
     data,
+    workflow: template
+      ? {
+          critical: template.critical,
+          id: template._id,
+          identifier: template.triggers?.[0]?.identifier,
+          name: template.name,
+          tags: template.tags,
+          severity: template.severity ?? SeverityLevelEnum.NONE,
+        }
+      : undefined,
   };
 };
 
@@ -78,8 +106,8 @@ const mapSingleItem = ({
  * Currently the message entity has a generic interface for the messages from the different channels,
  * so we need to map it to a Notification DTO that is specific message interface for the in-app channel.
  */
-export function mapToDto(notification: MessageEntity): InboxNotification;
-export function mapToDto(notification: MessageEntity[]): InboxNotification[];
-export function mapToDto(notification: MessageEntity | MessageEntity[]): InboxNotification | InboxNotification[] {
+export function mapToDto(notification: MessageEntity): InboxNotificationDto;
+export function mapToDto(notification: MessageEntity[]): InboxNotificationDto[];
+export function mapToDto(notification: MessageEntity | MessageEntity[]): InboxNotificationDto | InboxNotificationDto[] {
   return Array.isArray(notification) ? notification.map((el) => mapSingleItem(el)) : mapSingleItem(notification);
 }

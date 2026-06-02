@@ -1,8 +1,7 @@
-import { Analytics } from '@segment/analytics-node';
 import { Logger } from '@nestjs/common';
-import Mixpanel from 'mixpanel';
-
 import { IOrganizationEntity } from '@novu/shared';
+import { Analytics } from '@segment/analytics-node';
+import Mixpanel from 'mixpanel';
 
 interface IUser {
   _id?: string | null;
@@ -20,7 +19,7 @@ export class AnalyticsService {
   private mixpanel: Mixpanel.Mixpanel;
   constructor(
     private segmentToken?: string | null,
-    private batchSize = 100,
+    private batchSize = 100
   ) {}
 
   async initialize() {
@@ -32,15 +31,17 @@ export class AnalyticsService {
     }
 
     if (process.env.MIXPANEL_TOKEN) {
-      this.mixpanel = Mixpanel.init(process.env.MIXPANEL_TOKEN);
+      const options: Mixpanel.InitConfig = {};
+
+      if (process.env.MIXPANEL_HOST) {
+        options.host = process.env.MIXPANEL_HOST;
+      }
+
+      this.mixpanel = Mixpanel.init(process.env.MIXPANEL_TOKEN, options);
     }
   }
 
-  upsertGroup(
-    organizationId: string,
-    organization: IOrganizationEntity,
-    user: IUser,
-  ) {
+  upsertGroup(organizationId: string, organization: IOrganizationEntity, user?: Pick<IUser, '_id'>) {
     if (!this.segmentEnabled) {
       return;
     }
@@ -50,7 +51,6 @@ export class AnalyticsService {
       id: organizationId,
       name: organization.name,
       createdAt: this.convertToIsoDate(organization.createdAt),
-      domain: organization.domain || user.email?.split('@')[1],
     };
 
     if (organization.productUseCases) {
@@ -65,8 +65,20 @@ export class AnalyticsService {
     }
 
     this.segment.group({
-      userId: user._id as any,
+      userId: user?._id as any,
       groupId: organizationId,
+      traits,
+    });
+  }
+
+  updateGroup(userId: string, groupId: string, traits: Record<string, string | string[]>) {
+    if (!this.segmentEnabled) {
+      return;
+    }
+
+    this.segment.group({
+      userId,
+      groupId,
       traits,
     });
   }
@@ -82,14 +94,12 @@ export class AnalyticsService {
     });
   }
 
-  upsertUser(user: IUser, distinctId: string) {
+  upsertUser(user: IUser, distinctId: string, traits: Record<string, string | string[]> = {}) {
     if (!this.segmentEnabled) {
       return;
     }
 
-    const githubToken = (user as any).tokens?.find(
-      (token) => token.provider === 'github',
-    );
+    const githubToken = (user as any).tokens?.find((token) => token.provider === 'github');
 
     this.segment.identify({
       userId: distinctId,
@@ -103,6 +113,7 @@ export class AnalyticsService {
         // For segment auto mapping
         created: this.convertToIsoDate(user.createdAt),
         githubProfile: githubToken?.username,
+        ...traits,
       },
     });
   }
@@ -140,16 +151,12 @@ export class AnalyticsService {
           message: error.message,
         },
         'There has been an error when tracking',
-        LOG_CONTEXT,
+        LOG_CONTEXT
       );
     }
   }
 
-  mixpanelTrack(
-    name: string,
-    userId: string,
-    data: Record<string, unknown> = {},
-  ) {
+  mixpanelTrack(name: string, userId: string, data: Record<string, unknown> = {}) {
     if (!this.mixpanelEnabled) {
       return;
     }
@@ -167,7 +174,7 @@ export class AnalyticsService {
           message: error?.message,
         },
         'There has been an error when tracking mixpanel',
-        LOG_CONTEXT,
+        LOG_CONTEXT
       );
     }
   }

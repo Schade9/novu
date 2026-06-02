@@ -1,19 +1,21 @@
-import { useMemo } from 'react';
 import { useFormContext } from 'react-hook-form';
-
-import { ControlInput } from '@/components/primitives/control-input';
 import { FormControl, FormField, FormItem, FormMessage } from '@/components/primitives/form/form';
+import { ControlInput } from '@/components/workflow-editor/control-input';
 import { useWorkflow } from '@/components/workflow-editor/workflow-provider';
-import { parseStepVariablesToLiquidVariables } from '@/utils/parseStepVariablesToLiquidVariables';
+import { useParseVariables } from '@/hooks/use-parse-variables';
 import { capitalize } from '@/utils/string';
-import { InputRoot, InputWrapper } from '../../../primitives/input';
+import { InputRoot } from '../../../primitives/input';
 
 const bodyKey = 'body';
 
 export const BaseBody = () => {
   const { control } = useFormContext();
-  const { step } = useWorkflow();
-  const variables = useMemo(() => (step ? parseStepVariablesToLiquidVariables(step.variables) : []), [step]);
+  const { step, digestStepBeforeCurrent, workflow } = useWorkflow();
+  const { variables, isAllowedVariable } = useParseVariables(step?.variables, digestStepBeforeCurrent?.stepId);
+
+  const hintMessage = workflow?.isTranslationEnabled
+    ? 'Type {{ to access variables or {t. to access translation keys.'
+    : 'Type {{ to access variables.';
 
   return (
     <FormField
@@ -23,19 +25,20 @@ export const BaseBody = () => {
         <FormItem className="w-full">
           <FormControl>
             <InputRoot hasError={!!fieldState.error}>
-              <InputWrapper className="h-36 items-start p-3 py-2">
-                <ControlInput
-                  placeholder={capitalize(field.name)}
-                  id={field.name}
-                  variables={variables}
-                  value={field.value}
-                  multiline
-                  onChange={field.onChange}
-                />
-              </InputWrapper>
+              <ControlInput
+                className="min-h-28"
+                placeholder={capitalize(field.name)}
+                id={field.name}
+                variables={variables}
+                isAllowedVariable={isAllowedVariable}
+                value={field.value}
+                multiline
+                onChange={field.onChange}
+                enableTranslations
+              />
             </InputRoot>
           </FormControl>
-          <FormMessage>{`You can use variables by typing {{ select from the list or create a new one.`}</FormMessage>
+          <FormMessage>{hintMessage}</FormMessage>
         </FormItem>
       )}
     />

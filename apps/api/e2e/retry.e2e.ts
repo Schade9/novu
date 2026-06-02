@@ -1,10 +1,9 @@
 import { Novu } from '@novu/api';
-import { expect } from 'chai';
 import { topicsList } from '@novu/api/funcs/topicsList';
-import { FilterTopicsResponseDto } from '@novu/api/src/models/components/filtertopicsresponsedto';
+import { expect } from 'chai';
 import { expectSdkExceptionGeneric } from '../src/app/shared/helpers/e2e/sdk/e2e-sdk.helper';
-import { MockHTTPClient } from './mock-http-server';
 import { ErrorDto } from '../src/error-dto';
+import { MockHTTPClient } from './mock-http-client';
 
 function getIdempotencyKeys(mockHTTPClient: MockHTTPClient) {
   return mockHTTPClient
@@ -35,13 +34,15 @@ describe('Novu Node.js package - Retries and idempotency-key', () => {
       },
     ]);
     novuClient = new Novu({
-      apiKey: 'fakeKey',
+      security: {
+        secretKey: 'fakeKey',
+      },
       serverURL: BACKEND_URL,
       httpClient: mockHTTPClient,
     });
 
     await novuClient.trigger({
-      name: 'fake-workflow',
+      workflowId: 'fake-workflow',
       to: { subscriberId: '123' },
       payload: {},
     });
@@ -62,12 +63,14 @@ describe('Novu Node.js package - Retries and idempotency-key', () => {
       },
     ]);
     novuClient = new Novu({
-      apiKey: 'fakeKey',
+      security: {
+        secretKey: 'fakeKey',
+      },
       serverURL: BACKEND_URL,
       httpClient,
     });
-    await novuClient.trigger({ name: 'fake-workflow', to: { subscriberId: '123' }, payload: {} });
-    await novuClient.trigger({ name: 'fake-workflow', to: { subscriberId: '123' }, payload: {} });
+    await novuClient.trigger({ workflowId: 'fake-workflow', to: { subscriberId: '123' }, payload: {} });
+    await novuClient.trigger({ workflowId: 'fake-workflow', to: { subscriberId: '123' }, payload: {} });
 
     const idempotencyRequestKeys = getIdempotencyRequestKeys(httpClient);
     expect(new Set(idempotencyRequestKeys).size, JSON.stringify(idempotencyRequestKeys)).to.be.eq(2);
@@ -93,12 +96,14 @@ describe('Novu Node.js package - Retries and idempotency-key', () => {
       },
     ]);
     novuClient = new Novu({
-      apiKey: 'fakeKey',
+      security: {
+        secretKey: 'fakeKey',
+      },
       serverURL: BACKEND_URL,
       httpClient: mockHTTPClient,
     });
 
-    await novuClient.trigger({ name: 'fake-workflow', to: { subscriberId: '123' }, payload: {} });
+    await novuClient.trigger({ workflowId: 'fake-workflow', to: { subscriberId: '123' }, payload: {} });
     expect(mockHTTPClient.getRecordedRequests().length).to.eq(4);
     const idempotencyKeys = getIdempotencyKeys(mockHTTPClient);
     expect(hasUniqueOnly(idempotencyKeys)).to.be.eq(true);
@@ -106,7 +111,9 @@ describe('Novu Node.js package - Retries and idempotency-key', () => {
 
   it('should fail after reaching max retries', async () => {
     novuClient = new Novu({
-      apiKey: 'fakeKey',
+      security: {
+        secretKey: 'fakeKey',
+      },
       serverURL: BACKEND_URL,
       httpClient: new MockHTTPClient([
         {
@@ -161,7 +168,9 @@ describe('Novu Node.js package - Retries and idempotency-key', () => {
   NON_RECOVERABLE_ERRORS.forEach(([status, message]) => {
     it('should not retry on non-recoverable %i error', async () => {
       novuClient = new Novu({
-        apiKey: 'fakeKey',
+        security: {
+          secretKey: 'fakeKey',
+        },
         serverURL: BACKEND_URL,
         httpClient: new MockHTTPClient([
           {
@@ -227,14 +236,16 @@ describe('Novu Node.js package - Retries and idempotency-key', () => {
         baseUrl: BACKEND_URL,
         path: TOPICS_PATH,
         responseCode: 200,
-        responseJson: { data: [], page: 1, pageSize: 30, totalCount: 0 } as FilterTopicsResponseDto,
+        responseJson: { data: [], page: 1, pageSize: 30, totalCount: 0 },
         method: 'GET',
         times: 1,
       },
     ]);
 
     novuClient = new Novu({
-      apiKey: 'fakeKey',
+      security: {
+        secretKey: 'fakeKey',
+      },
       serverURL: BACKEND_URL,
       httpClient: mockClient,
     });

@@ -1,9 +1,9 @@
 import { CommunityMemberRepository, OrganizationEntity } from '@novu/dal';
+import { MemberRoleEnum } from '@novu/shared';
 import { UserSession } from '@novu/testing';
 import { expect } from 'chai';
-import { MemberRoleEnum } from '@novu/shared';
 
-describe('Get organizations - /organizations (GET) #novu-v1-os', async () => {
+describe('Get organizations - /organizations (GET) #novu-v0-os', async () => {
   let session: UserSession;
   let otherSession: UserSession;
   let thirdSession: UserSession;
@@ -28,7 +28,7 @@ describe('Get organizations - /organizations (GET) #novu-v1-os', async () => {
         invitees: [
           {
             email: 'dddd@asdas.com',
-            role: MemberRoleEnum.MEMBER,
+            role: MemberRoleEnum.OSS_MEMBER,
           },
         ],
       })

@@ -1,4 +1,4 @@
-import { ChannelTypeEnum } from '@novu/shared';
+import { ChannelTypeEnum, SeverityLevelEnum } from '@novu/shared';
 import { ActivityFilters } from '@/api/activity';
 
 export type ActivityFiltersData = {
@@ -7,6 +7,10 @@ export type ActivityFiltersData = {
   workflows: string[];
   transactionId: string;
   subscriberId: string;
+  topicKey: string;
+  subscriptionId: string;
+  severity: SeverityLevelEnum[];
+  contextKeys: string[];
 };
 
 export type ActivityUrlState = {

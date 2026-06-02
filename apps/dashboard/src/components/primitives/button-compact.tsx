@@ -13,12 +13,12 @@ export const compactButtonVariants = tv({
   slots: {
     root: [
       // base
-      'relative flex shrink-0 items-center justify-center outline-none',
+      'relative flex shrink-0 items-center justify-center outline-hidden',
       'transition duration-200 ease-out',
       // disabled
       'disabled:pointer-events-none disabled:border-transparent disabled:bg-transparent disabled:text-text-disabled disabled:shadow-none',
       // focus
-      'focus:outline-none',
+      'focus:outline-hidden',
     ],
     icon: '',
   },
@@ -129,6 +129,7 @@ function CompactButtonIcon<T extends React.ElementType>({
 
   return <Component className={icon({ class: className })} {...rest} />;
 }
+
 CompactButtonIcon.displayName = COMPACT_BUTTON_ICON_NAME;
 
 const CompactButton = React.forwardRef<

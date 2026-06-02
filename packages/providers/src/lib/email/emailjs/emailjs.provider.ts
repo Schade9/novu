@@ -1,16 +1,17 @@
+import { EmailProviderIdEnum } from '@novu/shared';
 import {
   ChannelTypeEnum,
+  CheckIntegrationResponseEnum,
+  ICheckIntegrationResponse,
+  IEmailEventBody,
   IEmailOptions,
   IEmailProvider,
   ISendMessageSuccessResponse,
-  ICheckIntegrationResponse,
-  CheckIntegrationResponseEnum,
 } from '@novu/stateless';
-import type { Message, SMTPClient, MessageAttachment } from 'emailjs';
-import { EmailProviderIdEnum } from '@novu/shared';
-import { IEmailJsConfig } from './emailjs.config';
+// @ts-ignore CJS importing an ESM module, this fails only during the CJS build
+import type { Message, MessageAttachment, SMTPClient } from 'emailjs';
 import { BaseProvider, CasingEnum } from '../../../base.provider';
-import { WithPassthrough } from '../../../utils/types';
+import { IEmailJsConfig } from './emailjs.config';
 
 export class EmailJsProvider extends BaseProvider implements IEmailProvider {
   protected casing: CasingEnum = CasingEnum.KEBAB_CASE;
@@ -21,6 +22,39 @@ export class EmailJsProvider extends BaseProvider implements IEmailProvider {
   constructor(private readonly config: IEmailJsConfig) {
     super();
   }
+  async sendMessage(
+    emailOptions: IEmailOptions,
+    bridgeProviderData: Record<string, unknown> = {}
+  ): Promise<ISendMessageSuccessResponse> {
+    await this.ensureClientInitialized();
+
+    const headers: Message['header'] = {
+      ...emailOptions.headers,
+      from: emailOptions.from || this.config.from,
+      to: emailOptions.to,
+      subject: emailOptions.subject,
+      text: emailOptions.text,
+      attachment: this.mapAttachments(emailOptions),
+      cc: emailOptions.cc,
+      bcc: emailOptions.bcc,
+    };
+
+    if (emailOptions.replyTo) {
+      headers['reply-to'] = emailOptions.replyTo;
+    }
+
+    const { Message: EmailJsMessage } = await import('emailjs');
+    const sent = await this.client?.sendAsync(
+      new EmailJsMessage(this.transform(bridgeProviderData, headers).body as Message['header'])
+    );
+
+    return {
+      id: sent.header['message-id']!,
+      date: sent.header.date,
+    };
+  }
+  getMessageId?: (body: any | any[]) => string[];
+  parseEventBody?: (body: any | any[], identifier: string) => IEmailEventBody | undefined;
 
   private async ensureClientInitialized() {
     if (!this.client) {
@@ -37,36 +71,11 @@ export class EmailJsProvider extends BaseProvider implements IEmailProvider {
     }
   }
 
-  async sendMessage(
-    emailOptions: IEmailOptions,
-    bridgeProviderData: WithPassthrough<Record<string, unknown>> = {},
-  ): Promise<ISendMessageSuccessResponse> {
-    await this.ensureClientInitialized();
-
-    const headers: Message['header'] = {
-      from: emailOptions.from || this.config.from,
-      to: emailOptions.to,
-      subject: emailOptions.subject,
-      text: emailOptions.text,
-      attachment: this.mapAttachments(emailOptions),
-      cc: emailOptions.cc,
-      bcc: emailOptions.bcc,
-    };
-
-    if (emailOptions.replyTo) {
-      headers['reply-to'] = emailOptions.replyTo;
-    }
-
-    const { Message: EmailJsMessage } = await import('emailjs');
-    const sent = await this.client?.sendAsync(
-      new EmailJsMessage(
-        this.transform(bridgeProviderData, headers).body as Message['header'],
-      ),
-    );
-
+  async checkIntegration(options: IEmailOptions): Promise<ICheckIntegrationResponse> {
     return {
-      id: sent.header['message-id']!,
-      date: sent.header.date,
+      success: true,
+      message: 'Integrated successfully!',
+      code: CheckIntegrationResponseEnum.SUCCESS,
     };
   }
 
@@ -77,6 +86,7 @@ export class EmailJsProvider extends BaseProvider implements IEmailProvider {
             name: attachment.name,
             data: attachment.file.toString('base64'),
             type: attachment.mime,
+            inline: Boolean(attachment.cid),
           };
         })
       : [];
@@ -84,15 +94,5 @@ export class EmailJsProvider extends BaseProvider implements IEmailProvider {
     attachmentsModel?.push({ data: emailOptions.html, alternative: true });
 
     return attachmentsModel;
-  }
-
-  async checkIntegration(
-    options: IEmailOptions,
-  ): Promise<ICheckIntegrationResponse> {
-    return {
-      success: true,
-      message: 'Integrated successfully!',
-      code: CheckIntegrationResponseEnum.SUCCESS,
-    };
   }
 }

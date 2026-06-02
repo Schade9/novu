@@ -1,15 +1,22 @@
-import { Loader } from 'lucide-react';
-import { Card, CardContent } from '../primitives/card';
-import { useState, useEffect } from 'react';
 import { IEnvironment } from '@novu/shared';
-import { API_HOSTNAME, WEBSOCKET_HOSTNAME } from '../../config';
 import { motion } from 'motion/react';
-import { Framework, frameworks } from './framework-guides.instructions';
-import { FrameworkInstructions } from './framework-guides';
-import { TelemetryEvent } from '../../utils/telemetry';
+import { useCallback, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { IS_AI_FEATURES_ENABLED } from '@/config';
 import { useTelemetry } from '../../hooks/use-telemetry';
+import { buildRoute, ROUTES } from '../../utils/routes';
+import { TelemetryEvent } from '../../utils/telemetry';
+import { Framework, getFrameworks } from './framework-guides.instructions';
+import { FrameworkGrid } from './inbox-framework-guide/framework-grid';
+import { HeaderSection } from './inbox-framework-guide/header-section';
+import { updateFrameworkCode } from './inbox-framework-guide/helpers';
+import { InstructionsPanel } from './inbox-framework-guide/instructions-panel';
+import type { InstallationMethod } from './inbox-framework-guide/types';
 
-const containerVariants = {
+const FRAMEWORKS_WITH_MANUAL_ONLY = ['Remix', 'Native', 'Angular', 'JavaScript'];
+const FRAMEWORKS_WITH_INSTALLATION_TABS = ['Next.js', 'React'];
+
+const CONTAINER_VARIANTS = {
   hidden: {},
   show: {
     transition: {
@@ -19,100 +26,13 @@ const containerVariants = {
   },
 };
 
-const cardVariants = {
-  hidden: {
-    opacity: 0,
-    y: 10,
-  },
-  show: {
-    opacity: 1,
-    y: 0,
-    transition: {
-      duration: 0.2,
-      ease: 'easeOut',
-    },
-  },
-};
-
-const iconVariants = {
-  initial: {
-    scale: 1,
-  },
-  hover: {
-    scale: 1.1,
-    transition: {
-      scale: {
-        duration: 0.2,
-        ease: 'easeOut',
-      },
-    },
-  },
-};
-
 interface InboxFrameworkGuideProps {
   currentEnvironment: IEnvironment | undefined;
   subscriberId: string;
   primaryColor: string;
   foregroundColor: string;
-}
-
-function getUrlProps(isDefaultApi: boolean, isDefaultWs: boolean): string {
-  const props = [
-    ...(isDefaultApi ? [] : [`backendUrl="${API_HOSTNAME}"`]),
-    ...(isDefaultWs ? [] : [`socketUrl="${WEBSOCKET_HOSTNAME}"`]),
-  ];
-
-  return props.length ? '\n      ' + props.join('\n      ') : '';
-}
-
-function generateInboxComponent(
-  environmentIdentifier: string,
-  subscriberId: string,
-  urlProps: string,
-  primaryColor: string,
-  foregroundColor: string
-): string {
-  return `<Inbox
-      applicationIdentifier="${environmentIdentifier}"
-      subscriberId="${subscriberId}"
-      routerPush={(path: string) => router.push(path)}${urlProps}
-      appearance={{
-        variables: {
-          colorPrimary: "${primaryColor}",
-          colorForeground: "${foregroundColor}"
-        }
-      }}
-    />`;
-}
-
-function generateNovuProvider(environmentIdentifier: string, subscriberId: string, urlProps: string): string {
-  return `<NovuProvider
-      applicationIdentifier="${environmentIdentifier}"
-      subscriberId="${subscriberId}"${urlProps}
-    >
-      <YourCustomInbox />
-    </NovuProvider>`;
-}
-
-function updateFrameworkCode(
-  framework: Framework,
-  inboxComponent: string,
-  novuProvider: string,
-  environmentIdentifier: string,
-  subscriberId: string
-): Framework {
-  return {
-    ...framework,
-    installSteps: framework.installSteps.map((step) => ({
-      ...step,
-      code: step.code
-        ?.replace(/<Inbox[\s\S]*?\/>/, inboxComponent)
-        ?.replace(/<NovuProvider[\s\S]*?<\/NovuProvider>/, novuProvider)
-        ?.replace(/YOUR_APP_ID/g, environmentIdentifier)
-        ?.replace(/YOUR_APPLICATION_IDENTIFIER/g, environmentIdentifier)
-        ?.replace(/YOUR_SUBSCRIBER_ID/g, subscriberId),
-    })),
-  };
+  backendUrl?: string;
+  socketUrl?: string;
 }
 
 export function InboxFrameworkGuide({
@@ -122,89 +42,101 @@ export function InboxFrameworkGuide({
   foregroundColor,
 }: InboxFrameworkGuideProps) {
   const track = useTelemetry();
-  const [selectedFramework, setSelectedFramework] = useState(frameworks.find((f) => f.selected) || frameworks[0]);
+  const navigate = useNavigate();
 
-  useEffect(() => {
-    if (!currentEnvironment?.identifier || !subscriberId) return;
+  const defaultInstallationMethod: InstallationMethod = IS_AI_FEATURES_ENABLED ? 'ai-assist' : 'manual';
+  const frameworks = getFrameworks(defaultInstallationMethod, currentEnvironment?.identifier, subscriberId) || [];
 
-    const isDefaultApi = API_HOSTNAME === 'https://api.novu.co';
-    const isDefaultWs = WEBSOCKET_HOSTNAME === 'https://ws.novu.co';
+  const [selectedFrameworkName, setSelectedFrameworkName] = useState<string>(() => {
+    return frameworks.find((f) => f.selected)?.name ?? frameworks[0]?.name ?? '';
+  });
+  const [installationMethod, setInstallationMethod] = useState<InstallationMethod>(defaultInstallationMethod);
 
-    const urlProps = getUrlProps(isDefaultApi, isDefaultWs);
-    const inboxComponent = generateInboxComponent(
-      currentEnvironment.identifier,
-      subscriberId,
-      urlProps,
-      primaryColor,
-      foregroundColor
+  const effectiveInstallationMethod = useMemo<InstallationMethod>(
+    () => (FRAMEWORKS_WITH_MANUAL_ONLY.includes(selectedFrameworkName) ? 'manual' : installationMethod),
+    [selectedFrameworkName, installationMethod]
+  );
+
+  const currentFrameworks = useMemo(
+    () => getFrameworks(effectiveInstallationMethod, currentEnvironment?.identifier, subscriberId),
+    [effectiveInstallationMethod, currentEnvironment?.identifier, subscriberId]
+  );
+  const updatedFrameworks = useMemo(() => {
+    if (!currentEnvironment?.identifier || !subscriberId) return currentFrameworks;
+    return currentFrameworks.map((framework) =>
+      updateFrameworkCode(framework, currentEnvironment.identifier, subscriberId, primaryColor, foregroundColor)
     );
-    const novuProvider = generateNovuProvider(currentEnvironment.identifier, subscriberId, urlProps);
+  }, [currentFrameworks, currentEnvironment?.identifier, subscriberId, primaryColor, foregroundColor]);
 
-    const updatedFrameworks = frameworks.map((framework) =>
-      updateFrameworkCode(framework, inboxComponent, novuProvider, currentEnvironment.identifier, subscriberId)
-    );
+  const selectedFramework = useMemo(
+    () => updatedFrameworks.find((f) => f.name === selectedFrameworkName) || updatedFrameworks[0],
+    [updatedFrameworks, selectedFrameworkName]
+  );
 
-    setSelectedFramework(updatedFrameworks.find((f) => f.name === selectedFramework.name) || updatedFrameworks[0]);
-  }, [currentEnvironment?.identifier, subscriberId, selectedFramework.name, primaryColor, foregroundColor]);
+  const handleFrameworkSelect = useCallback(
+    (framework: Framework) => {
+      track(TelemetryEvent.INBOX_FRAMEWORK_SELECTED, { framework: framework.name });
+      setSelectedFrameworkName(framework.name);
 
-  function handleFrameworkSelect(framework: Framework) {
-    track(TelemetryEvent.INBOX_FRAMEWORK_SELECTED, {
-      framework: framework.name,
-    });
+      if (FRAMEWORKS_WITH_MANUAL_ONLY.includes(framework.name)) {
+        setInstallationMethod('manual');
+      } else if (IS_AI_FEATURES_ENABLED && FRAMEWORKS_WITH_INSTALLATION_TABS.includes(framework.name)) {
+        setInstallationMethod('ai-assist');
+      }
+    },
+    [track]
+  );
 
-    setSelectedFramework(framework);
+  const handleInstallationMethodChange = useCallback((method: InstallationMethod) => {
+    setInstallationMethod(method);
+  }, []);
+
+  const showInstallationTabs = useMemo(
+    () => IS_AI_FEATURES_ENABLED && FRAMEWORKS_WITH_INSTALLATION_TABS.includes(selectedFrameworkName),
+    [selectedFrameworkName]
+  );
+
+  if (frameworks.length === 0) {
+    return null;
   }
 
   return (
     <>
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.2, ease: 'easeOut' }}
-        className="flex items-start gap-4 pl-[72px]"
-      >
-        <div className="flex flex-col border-l border-[#eeeef0] p-8">
-          <div className="flex items-center gap-2">
-            <Loader className="h-3.5 w-3.5 text-[#dd2476] [animation:spin_5s_linear_infinite]" />
-            <span className="animate-gradient bg-gradient-to-r from-[#dd2476] via-[#ff512f] to-[#dd2476] bg-[length:400%_400%] bg-clip-text text-sm font-medium text-transparent">
-              Watching for Inbox Integration
-            </span>
-          </div>
-          <p className="text-foreground-400 text-xs">You're just a couple steps away from your first notification.</p>
+      <HeaderSection />
+
+      <motion.div variants={CONTAINER_VARIANTS} initial="hidden" animate="show" className="flex flex-col gap-6 px-6">
+        <div className="flex flex-col gap-4">
+          <FrameworkGrid
+            frameworks={currentFrameworks}
+            selectedFrameworkName={selectedFrameworkName}
+            onSelect={handleFrameworkSelect}
+          />
+        </div>
+
+        <div className="flex flex-col gap-3">
+          <InstructionsPanel
+            selectedFramework={selectedFramework}
+            installationMethod={effectiveInstallationMethod}
+            showInstallationTabs={showInstallationTabs}
+            onMethodChange={handleInstallationMethodChange}
+            footer={
+              <button
+                type="button"
+                onClick={() => {
+                  track(TelemetryEvent.SKIP_ONBOARDING_CLICKED, {
+                    usecase: 'inbox',
+                    skippedFrom: 'inbox-embed-setup-later',
+                  });
+                  navigate(buildRoute(ROUTES.WELCOME, { environmentSlug: currentEnvironment?.slug ?? '' }));
+                }}
+                className="text-foreground-400 hover:text-foreground-600 cursor-pointer text-sm transition-colors"
+              >
+                Skip, I'll set up later
+              </button>
+            }
+          />
         </div>
       </motion.div>
-
-      {/* Framework Cards */}
-      <motion.div variants={containerVariants} initial="hidden" animate="show" className="flex gap-2 px-6">
-        {frameworks.map((framework) => (
-          <motion.div
-            key={framework.name}
-            variants={cardVariants}
-            initial="initial"
-            whileHover="hover"
-            animate={framework.name === selectedFramework.name ? 'hover' : 'initial'}
-            className="relative"
-          >
-            <Card
-              onClick={() => handleFrameworkSelect(framework)}
-              className={`flex h-[100px] w-[100px] flex-col items-center justify-center border-none p-6 shadow-none hover:cursor-pointer ${
-                framework.name === selectedFramework.name ? 'bg-neutral-100' : ''
-              }`}
-            >
-              <CardContent className="flex flex-col items-center gap-3 p-0">
-                <motion.div variants={iconVariants} className="relative text-2xl">
-                  {framework.icon}
-                </motion.div>
-                <span className="text-sm text-[#525866]">{framework.name}</span>
-              </CardContent>
-            </Card>
-          </motion.div>
-        ))}
-      </motion.div>
-
-      <div className="min-h-[600px] w-full">
-        <FrameworkInstructions framework={selectedFramework} />
-      </div>
     </>
   );
 }

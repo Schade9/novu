@@ -11,40 +11,41 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
+import { ApiExcludeController, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  CreateWorkflowCommandV0,
+  CreateWorkflowV0,
+  RequirePermissions,
+  UpdateWorkflowCommandV0,
+  UpdateWorkflowV0,
+} from '@novu/application-generic';
 import {
   buildWorkflowPreferencesFromPreferenceChannels,
   DEFAULT_WORKFLOW_PREFERENCES,
+  PermissionsEnum,
+  ResourceOriginEnum,
+  ResourceTypeEnum,
   UserSessionData,
-  WorkflowOriginEnum,
-  WorkflowTypeEnum,
 } from '@novu/shared';
-import {
-  CreateWorkflow,
-  CreateWorkflowCommand,
-  UpdateWorkflow,
-  UpdateWorkflowCommand,
-} from '@novu/application-generic';
-
-import { ApiExcludeController, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { UserSession } from '../shared/framework/user.decorator';
-import { GetNotificationTemplates } from './usecases/get-notification-templates/get-notification-templates.usecase';
-import { GetNotificationTemplatesCommand } from './usecases/get-notification-templates/get-notification-templates.command';
-import { ChangeWorkflowStatusRequestDto, CreateWorkflowRequestDto, UpdateWorkflowRequestDto } from './dto';
-import { GetNotificationTemplate } from './usecases/get-notification-template/get-notification-template.usecase';
-import { GetNotificationTemplateCommand } from './usecases/get-notification-template/get-notification-template.command';
-import { DeleteNotificationTemplate } from './usecases/delete-notification-template/delete-notification-template.usecase';
-import { ChangeTemplateActiveStatus } from './usecases/change-template-active-status/change-template-active-status.usecase';
-import { ChangeTemplateActiveStatusCommand } from './usecases/change-template-active-status/change-template-active-status.command';
-import { RootEnvironmentGuard } from '../auth/framework/root-environment-guard.service';
-import { WorkflowResponse } from './dto/workflow-response.dto';
-import { WorkflowsResponseDto } from './dto/workflows.response.dto';
+import { RequireAuthentication } from '../auth/framework/auth.decorator';
 import { ExternalApiAccessible } from '../auth/framework/external-api.decorator';
-import { WorkflowsRequestDto } from './dto/workflows-request.dto';
-import { ApiCommonResponses, ApiOkResponse, ApiResponse } from '../shared/framework/response.decorator';
+import { RootEnvironmentGuard } from '../auth/framework/root-environment-guard.service';
 import { DataBooleanDto } from '../shared/dtos/data-wrapper-dto';
+import { ApiCommonResponses, ApiOkResponse, ApiResponse } from '../shared/framework/response.decorator';
+import { UserSession } from '../shared/framework/user.decorator';
+import { ChangeWorkflowStatusRequestDto, CreateWorkflowRequestDto, UpdateWorkflowRequestDto } from './dtos';
+import { WorkflowResponse } from './dtos/workflow-response.dto';
+import { WorkflowsResponseDto } from './dtos/workflows.response.dto';
+import { WorkflowsRequestDto } from './dtos/workflows-request.dto';
 import { CreateWorkflowQuery } from './queries';
+import { ChangeTemplateActiveStatusCommand } from './usecases/change-template-active-status/change-template-active-status.command';
+import { ChangeTemplateActiveStatus } from './usecases/change-template-active-status/change-template-active-status.usecase';
 import { DeleteNotificationTemplateCommand } from './usecases/delete-notification-template/delete-notification-template.command';
-import { UserAuthentication } from '../shared/framework/swagger/api.key.security';
+import { DeleteNotificationTemplate } from './usecases/delete-notification-template/delete-notification-template.usecase';
+import { GetNotificationTemplateCommand } from './usecases/get-notification-template/get-notification-template.command';
+import { GetNotificationTemplate } from './usecases/get-notification-template/get-notification-template.usecase';
+import { GetNotificationTemplatesCommand } from './usecases/get-notification-templates/get-notification-templates.command';
+import { GetNotificationTemplates } from './usecases/get-notification-templates/get-notification-templates.usecase';
 
 /**
  * @deprecated use controller in /workflows directory
@@ -54,12 +55,12 @@ import { UserAuthentication } from '../shared/framework/swagger/api.key.security
 @ApiExcludeController()
 @Controller('/notification-templates')
 @UseInterceptors(ClassSerializerInterceptor)
-@UserAuthentication()
+@RequireAuthentication()
 @ApiTags('Notification Templates')
 export class NotificationTemplateController {
   constructor(
-    private createWorkflowUsecase: CreateWorkflow,
-    private updateWorkflowUsecase: UpdateWorkflow,
+    private createWorkflowUsecaseV0: CreateWorkflowV0,
+    private updateWorkflowUsecaseV0: UpdateWorkflowV0,
     private getNotificationTemplateUsecase: GetNotificationTemplate,
     private getNotificationTemplatesUsecase: GetNotificationTemplates,
     private deleteTemplateByIdUsecase: DeleteNotificationTemplate,
@@ -74,6 +75,7 @@ export class NotificationTemplateController {
     deprecated: true,
   })
   @ExternalApiAccessible()
+  @RequirePermissions(PermissionsEnum.WORKFLOW_READ)
   getNotificationTemplates(
     @UserSession() user: UserSessionData,
     @Query() queryParams: WorkflowsRequestDto
@@ -98,13 +100,14 @@ export class NotificationTemplateController {
     deprecated: true,
   })
   @ExternalApiAccessible()
+  @RequirePermissions(PermissionsEnum.WORKFLOW_WRITE)
   async updateTemplateById(
     @UserSession() user: UserSessionData,
     @Param('templateId') templateId: string,
     @Body() body: UpdateWorkflowRequestDto
   ): Promise<WorkflowResponse> {
-    return await this.updateWorkflowUsecase.execute(
-      UpdateWorkflowCommand.create({
+    return await this.updateWorkflowUsecaseV0.execute(
+      UpdateWorkflowCommandV0.create({
         environmentId: user.environmentId,
         organizationId: user.organizationId,
         userId: user._id,
@@ -121,7 +124,7 @@ export class NotificationTemplateController {
         steps: body.steps,
         notificationGroupId: body.notificationGroupId,
         data: body.data,
-        type: WorkflowTypeEnum.REGULAR,
+        type: ResourceTypeEnum.REGULAR,
       })
     );
   }
@@ -137,6 +140,7 @@ export class NotificationTemplateController {
     deprecated: true,
   })
   @ExternalApiAccessible()
+  @RequirePermissions(PermissionsEnum.WORKFLOW_WRITE)
   deleteTemplateById(@UserSession() user: UserSessionData, @Param('templateId') templateId: string): Promise<boolean> {
     return this.deleteTemplateByIdUsecase.execute(
       DeleteNotificationTemplateCommand.create({
@@ -144,7 +148,7 @@ export class NotificationTemplateController {
         organizationId: user.organizationId,
         userId: user._id,
         templateId,
-        type: WorkflowTypeEnum.REGULAR,
+        type: ResourceTypeEnum.REGULAR,
       })
     );
   }
@@ -157,6 +161,7 @@ export class NotificationTemplateController {
     deprecated: true,
   })
   @ExternalApiAccessible()
+  @RequirePermissions(PermissionsEnum.WORKFLOW_READ)
   getNotificationTemplateById(
     @UserSession() user: UserSessionData,
     @Param('workflowIdOrIdentifier') workflowIdOrIdentifier: string
@@ -172,21 +177,22 @@ export class NotificationTemplateController {
   }
 
   @Post('')
-  @ExternalApiAccessible()
-  @UseGuards(RootEnvironmentGuard)
   @ApiResponse(WorkflowResponse, 201)
   @ApiOperation({
     summary: 'Create Notification template',
     description: `Notification templates have been renamed to Workflows, Please use the new workflows controller`,
     deprecated: true,
   })
+  @ExternalApiAccessible()
+  @UseGuards(RootEnvironmentGuard)
+  @RequirePermissions(PermissionsEnum.WORKFLOW_WRITE)
   create(
     @UserSession() user: UserSessionData,
     @Query() query: CreateWorkflowQuery,
     @Body() body: CreateWorkflowRequestDto
   ): Promise<WorkflowResponse> {
-    return this.createWorkflowUsecase.execute(
-      CreateWorkflowCommand.create({
+    return this.createWorkflowUsecaseV0.execute(
+      CreateWorkflowCommandV0.create({
         organizationId: user.organizationId,
         userId: user._id,
         environmentId: user.environmentId,
@@ -206,8 +212,8 @@ export class NotificationTemplateController {
         blueprintId: body.blueprintId,
         data: body.data,
         __source: query?.__source,
-        type: WorkflowTypeEnum.REGULAR,
-        origin: WorkflowOriginEnum.NOVU_CLOUD,
+        type: ResourceTypeEnum.REGULAR,
+        origin: ResourceOriginEnum.NOVU_CLOUD,
       })
     );
   }
@@ -221,6 +227,7 @@ export class NotificationTemplateController {
     deprecated: true,
   })
   @ExternalApiAccessible()
+  @RequirePermissions(PermissionsEnum.WORKFLOW_WRITE)
   changeActiveStatus(
     @UserSession() user: UserSessionData,
     @Body() body: ChangeWorkflowStatusRequestDto,

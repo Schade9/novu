@@ -1,5 +1,5 @@
-import mongoose, { Schema } from 'mongoose';
 import { ActorTypeEnum } from '@novu/shared';
+import mongoose, { Schema } from 'mongoose';
 
 import { schemaOptions } from '../schema-default.options';
 import { MessageTemplateDBModel } from './message-template.entity';
@@ -82,6 +82,7 @@ const messageTemplateSchema = new Schema<MessageTemplateDBModel>(
     controls: { schema: Schema.Types.Mixed, uiSchema: Schema.Types.Mixed },
     output: { schema: Schema.Types.Mixed },
     code: Schema.Types.String,
+    stepResolverHash: { type: Schema.Types.String },
   },
   schemaOptions
 );

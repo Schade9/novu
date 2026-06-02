@@ -1,10 +1,10 @@
 import { BookOpen } from 'lucide-react';
 import { motion } from 'motion/react';
-import { Card, CardContent } from '../primitives/card';
-import { ScrollBar, ScrollArea } from '../primitives/scroll-area';
 import { Link } from 'react-router-dom';
 import { useTelemetry } from '@/hooks/use-telemetry';
 import { TelemetryEvent } from '@/utils/telemetry';
+import { Card, CardContent } from '../primitives/card';
+import { ScrollArea, ScrollBar } from '../primitives/scroll-area';
 
 export interface Resource {
   title: string;
@@ -74,7 +74,7 @@ export function ResourcesList({ resources, title, icon }: ResourcesListProps) {
           {resources.map((resource, index) => (
             <motion.div key={index} variants={itemVariants}>
               <Link to={resource.url} target="_blank" rel="noopener" onClick={() => handleResourceClick(resource)}>
-                <Card className="w-60 shrink-0 overflow-hidden border-none shadow-[0px_12px_12px_0px_rgba(0,0,0,0.02),0px_0px_0px_1px_rgba(0,0,0,0.05)] transition-all duration-200">
+                <Card className="w-48 shrink-0 overflow-hidden border-none shadow-[0px_12px_12px_0px_rgba(0,0,0,0.02),0px_0px_0px_1px_rgba(0,0,0,0.05)] transition-all duration-200 md:w-60">
                   <motion.div
                     className="bg-foreground-50 h-[95px] overflow-hidden"
                     whileHover={{ scale: 1.03 }}

@@ -1,10 +1,5 @@
+import { CheckIntegrationResponseEnum, IEmailOptions, ISendMessageSuccessResponse } from '@novu/stateless';
 import { expect, test, vi } from 'vitest';
-
-import {
-  CheckIntegrationResponseEnum,
-  IEmailOptions,
-  ISendMessageSuccessResponse,
-} from '@novu/stateless';
 import { IEmailJsConfig } from './emailjs.config';
 import { EmailJsProvider } from './emailjs.provider';
 
@@ -18,9 +13,7 @@ const mockNovuMessage = {
   html: '<div> Mail Content </div>',
   text: 'Mail Content',
   from: 'test@test.com',
-  attachments: [
-    { mime: 'text/plain', file: Buffer.from('dGVzdA=='), name: 'test.txt' },
-  ],
+  attachments: [{ mime: 'text/plain', file: Buffer.from('dGVzdA=='), name: 'test.txt' }],
 } as IEmailOptions;
 
 test('should trigger emailjs with expected parameters', async () => {
@@ -35,7 +28,7 @@ test('should trigger emailjs with expected parameters', async () => {
   const response = await provider.sendMessage(mockNovuMessage);
 
   expect(spy).toHaveBeenCalled();
-  expect(spy).toBeCalledWith({
+  expect(spy).toHaveBeenCalledWith({
     to: mockNovuMessage.to,
     subject: mockNovuMessage.subject,
     html: mockNovuMessage.html,
@@ -56,15 +49,13 @@ test('should trigger emailjs with expected parameters', async () => {
 
 test('should trigger emailjs checkIntegration correctly', async () => {
   const provider = new EmailJsProvider(mockConfig);
-  const spy = vi
-    .spyOn(provider, 'checkIntegration')
-    .mockImplementation(async () => {
-      return {
-        success: true,
-        message: 'Integrated successfully!',
-        code: CheckIntegrationResponseEnum.SUCCESS,
-      };
-    });
+  const spy = vi.spyOn(provider, 'checkIntegration').mockImplementation(async () => {
+    return {
+      success: true,
+      message: 'Integrated successfully!',
+      code: CheckIntegrationResponseEnum.SUCCESS,
+    };
+  });
 
   const response = await provider.checkIntegration(mockNovuMessage);
 

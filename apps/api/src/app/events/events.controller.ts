@@ -1,16 +1,31 @@
-import { v4 as uuidv4 } from 'uuid';
-import { Body, Controller, Delete, Param, Post, Scope } from '@nestjs/common';
+import { Body, Controller, Delete, Param, Post, Req, Scope, ServiceUnavailableException } from '@nestjs/common';
 import { ApiExcludeEndpoint, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { FeatureFlagsService, RequirePermissions, ResourceCategory } from '@novu/application-generic';
 import {
   AddressingTypeEnum,
   ApiRateLimitCategoryEnum,
   ApiRateLimitCostEnum,
+  FeatureFlagsKeysEnum,
+  PermissionsEnum,
   ResourceEnum,
   TriggerRequestCategoryEnum,
   UserSessionData,
 } from '@novu/shared';
-import { ResourceCategory } from '@novu/application-generic';
-
+import { PayloadValidationExceptionDto } from '../../error-dto';
+import { RequireAuthentication } from '../auth/framework/auth.decorator';
+import { ExternalApiAccessible } from '../auth/framework/external-api.decorator';
+import { ThrottlerCategory, ThrottlerCost } from '../rate-limiting/guards';
+import { AnalyticsStrategyEnum, LogAnalytics } from '../shared/framework/analytics-logs.interceptor';
+import {
+  ApiCommonResponses,
+  ApiCreatedResponse,
+  ApiOkResponse,
+  ApiResponse,
+} from '../shared/framework/response.decorator';
+import { KeylessAccessible } from '../shared/framework/swagger/keyless.security';
+import { SdkGroupName, SdkMethodName, SdkUsageExample } from '../shared/framework/swagger/sdk.decorators';
+import { UserSession } from '../shared/framework/user.decorator';
+import { RequestWithReqId } from '../shared/middleware/request-id.middleware';
 import {
   BulkTriggerEventDto,
   TestSendEmailRequestDto,
@@ -21,24 +36,22 @@ import {
 import { CancelDelayed, CancelDelayedCommand } from './usecases/cancel-delayed';
 import { ParseEventRequest, ParseEventRequestMulticastCommand } from './usecases/parse-event-request';
 import { ProcessBulkTrigger, ProcessBulkTriggerCommand } from './usecases/process-bulk-trigger';
-import { TriggerEventToAll, TriggerEventToAllCommand } from './usecases/trigger-event-to-all';
 import { SendTestEmail, SendTestEmailCommand } from './usecases/send-test-email';
+import { TriggerEventToAll, TriggerEventToAllCommand } from './usecases/trigger-event-to-all';
 
-import { UserSession } from '../shared/framework/user.decorator';
-import { ExternalApiAccessible } from '../auth/framework/external-api.decorator';
-import {
-  ApiCommonResponses,
-  ApiCreatedResponse,
-  ApiOkResponse,
-  ApiResponse,
-} from '../shared/framework/response.decorator';
-import { DataBooleanDto } from '../shared/dtos/data-wrapper-dto';
-import { ThrottlerCategory, ThrottlerCost } from '../rate-limiting/guards';
-import { UserAuthentication } from '../shared/framework/swagger/api.key.security';
-import { SdkGroupName, SdkMethodName, SdkUsageExample } from '../shared/framework/swagger/sdk.decorators';
+function RequestAnalytics(strategy: AnalyticsStrategyEnum = AnalyticsStrategyEnum.BASIC) {
+  return (_target: any, _propertyKey: string, descriptor: PropertyDescriptor) => {
+    // Set analytics strategy as a property on the method
+    const originalMethod = descriptor.value;
+    originalMethod._analyticsStrategy = strategy;
+
+    return descriptor;
+  };
+}
 
 @ThrottlerCategory(ApiRateLimitCategoryEnum.TRIGGER)
 @ResourceCategory(ResourceEnum.EVENTS)
+@RequireAuthentication()
 @ApiCommonResponses()
 @Controller({
   path: 'events',
@@ -51,28 +64,50 @@ export class EventsController {
     private triggerEventToAll: TriggerEventToAll,
     private sendTestEmail: SendTestEmail,
     private parseEventRequest: ParseEventRequest,
-    private processBulkTriggerUsecase: ProcessBulkTrigger
+    private processBulkTriggerUsecase: ProcessBulkTrigger,
+    private featureFlagsService: FeatureFlagsService
   ) {}
 
+  private async checkKillSwitch(user: UserSessionData): Promise<void> {
+    const isKillSwitchEnabled = await this.featureFlagsService.getFlag({
+      key: FeatureFlagsKeysEnum.IS_ORG_KILLSWITCH_FLAG_ENABLED,
+      defaultValue: false,
+      organization: { _id: user.organizationId },
+      environment: { _id: user.environmentId },
+      component: 'trigger',
+    });
+
+    if (isKillSwitchEnabled) {
+      throw new ServiceUnavailableException('Service temporarily unavailable for this organization');
+    }
+  }
+
+  @KeylessAccessible()
   @ExternalApiAccessible()
-  @UserAuthentication()
   @Post('/trigger')
+  @RequestAnalytics(AnalyticsStrategyEnum.EVENTS)
+  @LogAnalytics(AnalyticsStrategyEnum.EVENTS)
   @ApiResponse(TriggerEventResponseDto, 201)
+  @ApiResponse(PayloadValidationExceptionDto, 400, false, false, {
+    description: 'Payload validation failed - returned when payload does not match the workflow schema',
+  })
   @ApiOperation({
     summary: 'Trigger event',
     description: `
-    Trigger event is the main (and only) way to send notifications to subscribers. 
-    The trigger identifier is used to match the particular workflow associated with it. 
-    Additional information can be passed according the body interface below.
-    `,
+    Trigger event is the main (and only) way to send notifications to subscribers. The trigger identifier is used to match the particular workflow associated with it. Maximum number of recipients can be 100. Additional information can be passed according the body interface below.
+    To prevent duplicate triggers, you can optionally pass a **transactionId** in the request body. If the same **transactionId** is used again, the trigger will be ignored. The retention period depends on your billing tier.`,
   })
   @SdkMethodName('trigger')
   @SdkUsageExample('Trigger Notification Event')
   @SdkGroupName('')
+  @RequirePermissions(PermissionsEnum.EVENT_WRITE)
   async trigger(
     @UserSession() user: UserSessionData,
+    @Req() req: RequestWithReqId,
     @Body() body: TriggerEventRequestDto
   ): Promise<TriggerEventResponseDto> {
+    await this.checkKillSwitch(user);
+
     const result = await this.parseEventRequest.execute(
       ParseEventRequestMulticastCommand.create({
         userId: user._id,
@@ -84,11 +119,13 @@ export class EventsController {
         to: body.to,
         actor: body.actor,
         tenant: body.tenant,
+        context: body.context,
         transactionId: body.transactionId,
         addressingType: AddressingTypeEnum.MULTICAST,
         requestCategory: TriggerRequestCategoryEnum.SINGLE,
         bridgeUrl: body.bridgeUrl,
         controls: body.controls,
+        requestId: req._nvRequestId,
       })
     );
 
@@ -96,13 +133,17 @@ export class EventsController {
   }
 
   @ExternalApiAccessible()
-  @UserAuthentication()
   @ThrottlerCost(ApiRateLimitCostEnum.BULK)
+  @RequestAnalytics(AnalyticsStrategyEnum.EVENTS_BULK)
+  @LogAnalytics(AnalyticsStrategyEnum.EVENTS_BULK)
   @Post('/trigger/bulk')
   @SdkMethodName('triggerBulk')
   @SdkUsageExample('Trigger Notification Events in Bulk')
   @SdkGroupName('')
   @ApiResponse(TriggerEventResponseDto, 201, true)
+  @ApiResponse(PayloadValidationExceptionDto, 400, false, false, {
+    description: 'Payload validation failed - returned when any event payload does not match the workflow schema',
+  })
   @ApiOperation({
     summary: 'Bulk trigger event',
     description: `
@@ -110,25 +151,34 @@ export class EventsController {
       The bulk API is limited to 100 events per request.
     `,
   })
+  @RequirePermissions(PermissionsEnum.EVENT_WRITE)
   async triggerBulk(
     @UserSession() user: UserSessionData,
-    @Body() body: BulkTriggerEventDto
+    @Body() body: BulkTriggerEventDto,
+    @Req() req: RequestWithReqId
   ): Promise<TriggerEventResponseDto[]> {
+    await this.checkKillSwitch(user);
+
     return this.processBulkTriggerUsecase.execute(
       ProcessBulkTriggerCommand.create({
         userId: user._id,
         organizationId: user.organizationId,
         environmentId: user.environmentId,
         events: body.events,
+        requestId: req._nvRequestId,
       })
     );
   }
 
   @ExternalApiAccessible()
-  @UserAuthentication()
   @ThrottlerCost(ApiRateLimitCostEnum.BULK)
+  @RequestAnalytics(AnalyticsStrategyEnum.EVENTS)
+  @LogAnalytics(AnalyticsStrategyEnum.EVENTS)
   @Post('/trigger/broadcast')
   @ApiResponse(TriggerEventResponseDto)
+  @ApiResponse(PayloadValidationExceptionDto, 400, false, false, {
+    description: 'Payload validation failed - returned when payload does not match the workflow schema',
+  })
   @SdkMethodName('triggerBroadcast')
   @SdkUsageExample('Broadcast Event to All')
   @SdkGroupName('')
@@ -139,13 +189,15 @@ export class EventsController {
   })
   @ApiCreatedResponse({
     description: 'Broadcast request has been registered successfully ',
-    type: TriggerEventResponseDto, // Specify the response type
+    type: TriggerEventResponseDto,
   })
+  @RequirePermissions(PermissionsEnum.EVENT_WRITE)
   async broadcastEventToAll(
     @UserSession() user: UserSessionData,
-    @Body() body: TriggerEventToAllRequestDto
+    @Body() body: TriggerEventToAllRequestDto,
+    @Req() req: RequestWithReqId
   ): Promise<TriggerEventResponseDto> {
-    const transactionId = body.transactionId || uuidv4();
+    await this.checkKillSwitch(user);
 
     return this.triggerEventToAll.execute(
       TriggerEventToAllCommand.create({
@@ -155,16 +207,18 @@ export class EventsController {
         identifier: body.name,
         payload: body.payload,
         tenant: body.tenant,
-        transactionId,
+        transactionId: body.transactionId,
         overrides: body.overrides || {},
         actor: body.actor,
+        context: body.context,
+        requestId: req._nvRequestId,
       })
     );
   }
 
-  @UserAuthentication()
   @Post('/test/email')
   @ApiExcludeEndpoint()
+  @RequirePermissions(PermissionsEnum.EVENT_WRITE)
   async testEmailMessage(@UserSession() user: UserSessionData, @Body() body: TestSendEmailRequestDto): Promise<void> {
     return await this.sendTestEmail.execute(
       SendTestEmailCommand.create({
@@ -187,10 +241,9 @@ export class EventsController {
   }
 
   @ExternalApiAccessible()
-  @UserAuthentication()
   @Delete('/trigger/:transactionId')
   @ApiOkResponse({
-    type: DataBooleanDto,
+    type: Boolean,
   })
   @ApiOperation({
     summary: 'Cancel triggered event',
@@ -202,6 +255,7 @@ export class EventsController {
   @SdkMethodName('cancel')
   @SdkUsageExample('Cancel Triggered Event')
   @SdkGroupName('')
+  @RequirePermissions(PermissionsEnum.EVENT_WRITE)
   async cancel(@UserSession() user: UserSessionData, @Param('transactionId') transactionId: string): Promise<boolean> {
     return await this.cancelDelayedUsecase.execute(
       CancelDelayedCommand.create({

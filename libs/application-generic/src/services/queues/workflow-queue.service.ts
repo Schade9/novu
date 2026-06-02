@@ -1,10 +1,13 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { CommunityOrganizationRepository } from '@novu/dal';
 import { JobTopicNameEnum } from '@novu/shared';
-
-import { QueueBaseService } from './queue-base.service';
-import { BullMqService } from '../bull-mq';
-import { WorkflowInMemoryProviderService } from '../in-memory-provider';
 import { IWorkflowBulkJobDto, IWorkflowJobDto } from '../../dtos';
+import { PinoLogger } from '../../logging';
+import { BullMqService } from '../bull-mq';
+import { FeatureFlagsService } from '../feature-flags';
+import { WorkflowInMemoryProviderService } from '../in-memory-provider';
+import { SqsService } from '../sqs';
+import { QueueBaseService } from './queue-base.service';
 
 const LOG_CONTEXT = 'WorkflowQueueService';
 
@@ -12,13 +15,21 @@ const LOG_CONTEXT = 'WorkflowQueueService';
 export class WorkflowQueueService extends QueueBaseService {
   constructor(
     public workflowInMemoryProviderService: WorkflowInMemoryProviderService,
+    sqsService: SqsService,
+    featureFlagsService: FeatureFlagsService,
+    organizationRepository: CommunityOrganizationRepository,
+    logger: PinoLogger
   ) {
     super(
       JobTopicNameEnum.WORKFLOW,
       new BullMqService(workflowInMemoryProviderService),
+      sqsService,
+      featureFlagsService,
+      organizationRepository,
+      logger
     );
 
-    Logger.log(`Creating queue ${this.topic}`, LOG_CONTEXT);
+    Logger.log({ topic: this.topic }, 'Creating queue', LOG_CONTEXT);
 
     this.createQueue();
   }

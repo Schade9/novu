@@ -1,3 +1,9 @@
+import type { IEnvironment, WorkflowListResponseDto, WorkflowResponseDto } from '@novu/shared';
+import { ResourceOriginEnum, WorkflowStatusEnum } from '@novu/shared';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
 import { getV2, NovuApiError } from '@/api/api.client';
 import { syncWorkflow } from '@/api/workflows';
 import { ConfirmationModal } from '@/components/confirmation-modal';
@@ -8,46 +14,28 @@ import TruncatedText from '@/components/truncated-text';
 import { useAuth } from '@/context/auth/hooks';
 import { useEnvironment, useFetchEnvironments } from '@/context/environment/hooks';
 import { buildRoute, ROUTES } from '@/utils/routes';
-import type { IEnvironment, WorkflowListResponseDto, WorkflowResponseDto } from '@novu/shared';
-import { WorkflowOriginEnum, WorkflowStatusEnum } from '@novu/shared';
-import { useMutation } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { toast } from 'sonner';
 
 export function useSyncWorkflow(workflow: WorkflowResponseDto | WorkflowListResponseDto) {
   const { currentEnvironment } = useEnvironment();
   const { currentOrganization } = useAuth();
+  const queryClient = useQueryClient();
   const { environments = [] } = useFetchEnvironments({ organizationId: currentOrganization?._id });
   const [isLoading, setIsLoading] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [targetEnvironmentId, setTargetEnvironmentId] = useState<string>();
   const navigate = useNavigate();
 
-  let loadingToast: string | number | undefined = undefined;
+  let loadingToast: string | number | undefined;
 
   const isSyncable = useMemo(
-    () => workflow.origin === WorkflowOriginEnum.NOVU_CLOUD && workflow.status !== WorkflowStatusEnum.ERROR,
+    () => workflow.origin === ResourceOriginEnum.NOVU_CLOUD && workflow.status !== WorkflowStatusEnum.ERROR,
     [workflow.origin, workflow.status]
   );
-
-  const getTooltipContent = () => {
-    if (workflow.origin === WorkflowOriginEnum.EXTERNAL) {
-      return 'Code-first workflows cannot be synced using dashboard.';
-    }
-
-    if (workflow.origin === WorkflowOriginEnum.NOVU_CLOUD_V1) {
-      return 'V1 workflows cannot be synced using dashboard. Please visit the legacy portal.';
-    }
-
-    if (workflow.status === WorkflowStatusEnum.ERROR) {
-      return 'This workflow has errors and cannot be synced. Please fix the errors first.';
-    }
-  };
 
   const safeSync = async (envId: string) => {
     try {
       setTargetEnvironmentId(envId);
+
       if (await isWorkflowInTargetEnvironment(envId)) {
         setShowConfirmModal(true);
 
@@ -69,6 +57,11 @@ export function useSyncWorkflow(workflow: WorkflowResponseDto | WorkflowListResp
   const onSyncSuccess = (workflow: WorkflowResponseDto, environment?: IEnvironment) => {
     toast.dismiss(loadingToast);
     setIsLoading(false);
+
+    // Invalidate diff environment queries when workflows are synced
+    queryClient.invalidateQueries({
+      queryKey: ['diff-environments'],
+    });
 
     return showToast({
       variant: 'lg',
@@ -148,7 +141,6 @@ export function useSyncWorkflow(workflow: WorkflowResponseDto | WorkflowListResp
     sync: syncWorkflowMutation,
     isSyncable,
     isLoading,
-    tooltipContent: getTooltipContent(),
     PromoteConfirmModal: () => {
       const targetEnvironment = environments.find((env) => env._id === targetEnvironmentId);
 
@@ -165,8 +157,8 @@ export function useSyncWorkflow(workflow: WorkflowResponseDto | WorkflowListResp
           title={`Sync workflow to ${targetEnvironment?.name}`}
           description={
             <>
-              Workflow <TruncatedText className="max-w-[32ch] font-bold">{workflow.name}</TruncatedText> already exists
-              in {targetEnvironment?.name}.<br />
+              Workflow <TruncatedText className="max-w-[32ch] font-semibold">{workflow.name}</TruncatedText> already
+              exists in {targetEnvironment?.name}.<br />
               <br />
               Proceeding will overwrite the existing workflow.
             </>

@@ -1,21 +1,52 @@
-import { createEffect, createMemo, createSignal, JSX, Show } from 'solid-js';
+import { createEffect, createMemo, createSignal, For, JSX, Show } from 'solid-js';
 
 import type { Notification } from '../../../notifications';
-import { ActionTypeEnum } from '../../../types';
+import { ActionTypeEnum, SeverityLevelEnum } from '../../../types';
 import { useInboxContext, useLocalization } from '../../context';
-import { cn, formatToRelativeTime, useStyle } from '../../helpers';
-import { Archive, ReadAll, Unarchive, Unread } from '../../icons';
-import type { NotificationActionClickHandler, NotificationClickHandler } from '../../types';
-import { NotificationStatus } from '../../types';
+import { cn, formatSnoozedUntil, formatToRelativeTime, useStyle } from '../../helpers';
+import { Clock as DefaultClock } from '../../icons/Clock';
+import {
+  AllAppearanceKey,
+  AvatarRenderer,
+  type BodyRenderer,
+  CustomActionsRenderer,
+  DefaultActionsRenderer,
+  InboxAppearanceCallback,
+  type NotificationActionClickHandler,
+  type NotificationClickHandler,
+  type SubjectRenderer,
+} from '../../types';
+import { ExternalElementRenderer } from '../ExternalElementRenderer';
 import Markdown from '../elements/Markdown';
 import { Button } from '../primitives';
-import { Tooltip } from '../primitives/Tooltip';
+import { Badge } from '../primitives/Badge';
+import { IconRendererWrapper } from '../shared/IconRendererWrapper';
+import { renderNotificationActions } from './NotificationActions';
 
 type DefaultNotificationProps = {
   notification: Notification;
+  renderAvatar?: AvatarRenderer;
+  renderSubject?: SubjectRenderer;
+  renderBody?: BodyRenderer;
+  renderDefaultActions?: DefaultActionsRenderer;
+  renderCustomActions?: CustomActionsRenderer;
   onNotificationClick?: NotificationClickHandler;
   onPrimaryActionClick?: NotificationActionClickHandler;
   onSecondaryActionClick?: NotificationActionClickHandler;
+};
+
+const SEVERITY_TO_BAR_KEYS: Record<SeverityLevelEnum, AllAppearanceKey> = {
+  [SeverityLevelEnum.NONE]: 'notificationBar',
+  [SeverityLevelEnum.HIGH]: 'severityHigh__notificationBar',
+  [SeverityLevelEnum.MEDIUM]: 'severityMedium__notificationBar',
+  [SeverityLevelEnum.LOW]: 'severityLow__notificationBar',
+};
+
+const SEVERITY_TO_NOTIFICATION_KEYS: Record<SeverityLevelEnum, AllAppearanceKey> = {
+  [SeverityLevelEnum.NONE]: 'notification',
+  [SeverityLevelEnum.HIGH]: 'severityHigh__notification',
+  [SeverityLevelEnum.MEDIUM]: 'severityMedium__notification',
+  [SeverityLevelEnum.LOW]: 'severityLow__notification',
 };
 
 export const DefaultNotification = (props: DefaultNotificationProps) => {
@@ -23,10 +54,32 @@ export const DefaultNotification = (props: DefaultNotificationProps) => {
   const { t, locale } = useLocalization();
   const { navigate, status } = useInboxContext();
   const [minutesPassed, setMinutesPassed] = createSignal(0);
-  const date = createMemo(() => {
+
+  const severity = createMemo(() => props.notification.severity ?? SeverityLevelEnum.NONE);
+
+  const createdAt = createMemo(() => {
     minutesPassed(); // register as dep
 
     return formatToRelativeTime({ fromDate: new Date(props.notification.createdAt), locale: locale() });
+  });
+  const snoozedUntil = createMemo(() => {
+    minutesPassed(); // register as dep
+    if (!props.notification.snoozedUntil) {
+      return null;
+    }
+
+    return formatSnoozedUntil({ untilDate: new Date(props.notification.snoozedUntil), locale: locale() });
+  });
+  const deliveredAt = createMemo(() => {
+    minutesPassed(); // register as dep
+
+    if (!props.notification.deliveredAt || !Array.isArray(props.notification.deliveredAt)) {
+      return null;
+    }
+
+    return props.notification.deliveredAt.map((date) =>
+      formatToRelativeTime({ fromDate: new Date(date), locale: locale() })
+    );
   });
 
   createEffect(() => {
@@ -37,12 +90,12 @@ export const DefaultNotification = (props: DefaultNotificationProps) => {
     return () => clearInterval(interval);
   });
 
-  const handleNotificationClick: JSX.EventHandlerUnion<HTMLAnchorElement, MouseEvent> = (e) => {
+  const handleNotificationClick: JSX.EventHandlerUnion<HTMLAnchorElement, MouseEvent> = async (e) => {
     e.stopPropagation();
     e.preventDefault();
 
     if (!props.notification.isRead) {
-      props.notification.read();
+      await props.notification.read();
     }
 
     props.onNotificationClick?.(props.notification);
@@ -50,16 +103,16 @@ export const DefaultNotification = (props: DefaultNotificationProps) => {
     navigate(props.notification.redirect?.url, props.notification.redirect?.target);
   };
 
-  const handleActionButtonClick = (action: ActionTypeEnum, e: MouseEvent) => {
+  const handleActionButtonClick = async (action: ActionTypeEnum, e: MouseEvent) => {
     e.stopPropagation();
 
     if (action === ActionTypeEnum.PRIMARY) {
-      props.notification.completePrimary();
+      await props.notification.completePrimary();
       props.onPrimaryActionClick?.(props.notification);
 
       navigate(props.notification.primaryAction?.redirect?.url, props.notification.primaryAction?.redirect?.target);
     } else {
-      props.notification.completeSecondary();
+      await props.notification.completeSecondary();
       props.onSecondaryActionClick?.(props.notification);
 
       navigate(props.notification.secondaryAction?.redirect?.url, props.notification.secondaryAction?.redirect?.target);
@@ -68,183 +121,296 @@ export const DefaultNotification = (props: DefaultNotificationProps) => {
 
   return (
     <a
-      class={style(
-        'notification',
-        cn('nt-w-full nt-text-sm hover:nt-bg-neutral-alpha-50 nt-group nt-relative nt-flex nt-py-4 nt-px-6 nt-gap-2', {
-          'nt-cursor-pointer': !props.notification.isRead || !!props.notification.redirect?.url,
-        })
-      )}
+      class={style({
+        key: SEVERITY_TO_NOTIFICATION_KEYS[severity()],
+        className: cn(
+          'nt-transition nt-w-full nt-text-sm hover:nt-bg-primary-alpha-25 nt-group nt-relative nt-flex nt-items-start nt-p-4 nt-gap-2',
+          '[&:not(:first-child)]:nt-border-t nt-border-neutral-alpha-100',
+          {
+            'nt-cursor-pointer': !props.notification.isRead || !!props.notification.redirect?.url,
+            'nt-bg-severity-high-alpha-100 hover:nt-bg-severity-high-alpha-50': severity() === SeverityLevelEnum.HIGH,
+            'nt-bg-severity-medium-alpha-100 hover:nt-bg-severity-medium-alpha-50':
+              severity() === SeverityLevelEnum.MEDIUM,
+            'nt-bg-severity-low-alpha-100 hover:nt-bg-severity-low-alpha-50': severity() === SeverityLevelEnum.LOW,
+          }
+        ),
+        context: { notification: props.notification } satisfies Parameters<InboxAppearanceCallback['notification']>[0],
+      })}
       onClick={handleNotificationClick}
     >
-      <Show when={!props.notification.isRead}>
-        <span
-          class={style(
-            'notificationDot',
-            'nt-absolute -nt-translate-x-[1.0625rem] nt-translate-y-1/2 nt-size-2.5 nt-bg-primary nt-rounded-full nt-border nt-border-neutral-alpha-200'
-          )}
-        />
-      </Show>
-      <Show when={props.notification.avatar}>
-        <img class={style('notificationImage', 'nt-size-8 nt-rounded-lg')} src={props.notification.avatar} />
-      </Show>
-      <div class={style('notificationBody', 'nt-overflow-hidden nt-w-full')}>
-        {/* eslint-disable-next-line local-rules/no-class-without-style */}
-        <div class="nt-relative nt-shrink-0 nt-float-right nt-ml-1 nt-pr-1.5">
-          <p
-            class={style(
-              'notificationDate',
-              'nt-transition nt-duration-100 nt-ease-out nt-text-foreground-alpha-400 nt-shrink-0 nt-float-right nt-text-right group-hover:nt-opacity-0'
-            )}
+      <div
+        class={style({
+          key: SEVERITY_TO_BAR_KEYS[severity()],
+          className: cn('nt-transition nt-absolute nt-left-0 nt-top-0 nt-bottom-0 nt-w-[3px]', {
+            'nt-bg-severity-high group-hover:nt-bg-severity-high-alpha-500': severity() === SeverityLevelEnum.HIGH,
+            'nt-bg-severity-medium group-hover:nt-bg-severity-medium-alpha-500':
+              severity() === SeverityLevelEnum.MEDIUM,
+            'nt-bg-severity-low group-hover:nt-bg-severity-low-alpha-500': severity() === SeverityLevelEnum.LOW,
+          }),
+          context: { notification: props.notification } satisfies Parameters<
+            InboxAppearanceCallback['notificationBar']
+          >[0],
+        })}
+      />
+
+      <Show
+        when={props.renderAvatar}
+        fallback={
+          <Show
+            when={props.notification.avatar}
+            fallback={
+              <div
+                class={style({
+                  key: 'notificationImageLoadingFallback',
+                  className: 'nt-size-8 nt-rounded-lg nt-shrink-0 nt-aspect-square',
+                  context: { notification: props.notification } satisfies Parameters<
+                    InboxAppearanceCallback['notificationImageLoadingFallback']
+                  >[0],
+                })}
+              />
+            }
           >
-            {date()}
-          </p>
-          <div
-            class={style(
-              'notificationDefaultActions',
-              `nt-transition nt-duration-100 nt-ease-out nt-gap-2 nt-flex nt-shrink-0 nt-opacity-0 group-hover:nt-opacity-100 nt-justify-center nt-items-center nt-absolute nt-top-0 nt-right-0 nt-bg-neutral-alpha-50 nt-rounded-lg nt-backdrop-blur-md nt-p-0.5`
-            )}
-          >
-            <Show when={status() !== NotificationStatus.ARCHIVED}>
-              <Show
-                when={props.notification.isRead}
-                fallback={
-                  <Tooltip.Root>
-                    <Tooltip.Trigger
-                      asChild={(childProps) => (
-                        <Button
-                          appearanceKey="notificationRead__button"
-                          size="icon"
-                          variant="icon"
-                          {...childProps}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            props.notification.read();
-                          }}
-                          class="hover:nt-bg-neutral-alpha-50 nt-p-0.5"
-                        >
-                          <ReadAll />
-                        </Button>
-                      )}
-                    />
-                    <Tooltip.Content data-localization="notification.actions.read.tooltip">
-                      {t('notification.actions.read.tooltip')}
-                    </Tooltip.Content>
-                  </Tooltip.Root>
-                }
-              >
-                <Tooltip.Root>
-                  <Tooltip.Trigger
-                    asChild={(childProps) => (
-                      <Button
-                        appearanceKey="notificationUnread__button"
-                        size="icon"
-                        variant="icon"
-                        {...childProps}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          props.notification.unread();
-                        }}
-                        class="hover:nt-bg-neutral-alpha-50 nt-p-0.5"
-                      >
-                        <Unread />
-                      </Button>
-                    )}
-                  />
-                  <Tooltip.Content data-localization="notification.actions.unread.tooltip">
-                    {t('notification.actions.unread.tooltip')}
-                  </Tooltip.Content>
-                </Tooltip.Root>
+            <img
+              class={style({
+                key: 'notificationImage',
+                className: 'nt-size-8 nt-rounded-lg nt-object-cover nt-aspect-square',
+                context: { notification: props.notification } satisfies Parameters<
+                  InboxAppearanceCallback['notificationImage']
+                >[0],
+              })}
+              src={props.notification.avatar}
+            />
+          </Show>
+        }
+      >
+        {(renderAvatar) => <ExternalElementRenderer render={(el) => renderAvatar()(el, props.notification)} />}
+      </Show>
+
+      <div
+        class={style({
+          key: 'notificationContent',
+          className: 'nt-flex nt-flex-col nt-gap-2 nt-w-full',
+          context: { notification: props.notification } satisfies Parameters<
+            InboxAppearanceCallback['notificationContent']
+          >[0],
+        })}
+      >
+        <div
+          class={style({
+            key: 'notificationTextContainer',
+            context: { notification: props.notification } satisfies Parameters<
+              InboxAppearanceCallback['notificationTextContainer']
+            >[0],
+          })}
+        >
+          <Show
+            when={props.renderSubject}
+            fallback={
+              <Show when={props.notification.subject}>
+                {(subject) => (
+                  <Markdown
+                    appearanceKey="notificationSubject"
+                    class="nt-text-start nt-font-medium nt-whitespace-pre-wrap [word-break:break-word]"
+                    strongAppearanceKey="notificationSubject__strong"
+                    emAppearanceKey="notificationSubject__em"
+                    context={{ notification: props.notification }}
+                  >
+                    {subject()}
+                  </Markdown>
+                )}
               </Show>
-            </Show>
-            <Show
-              when={props.notification.isArchived}
-              fallback={
-                <Tooltip.Root>
-                  <Tooltip.Trigger
-                    asChild={(childProps) => (
-                      <Button
-                        appearanceKey="notificationArchive__button"
-                        size="icon"
-                        variant="icon"
-                        {...childProps}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          props.notification.archive();
-                        }}
-                        class="hover:nt-bg-neutral-alpha-50 nt-p-0.5"
-                      >
-                        <Archive />
-                      </Button>
-                    )}
-                  />
-                  <Tooltip.Content data-localization="notification.actions.archive.tooltip">
-                    {t('notification.actions.archive.tooltip')}
-                  </Tooltip.Content>
-                </Tooltip.Root>
-              }
-            >
-              <Tooltip.Root>
-                <Tooltip.Trigger
-                  asChild={(childProps) => (
-                    <Button
-                      appearanceKey="notificationUnarchive__button"
-                      size="icon"
-                      variant="icon"
-                      {...childProps}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        props.notification.unarchive();
-                      }}
-                      class="hover:nt-bg-neutral-alpha-50 nt-p-0.5"
-                    >
-                      <Unarchive />
-                    </Button>
-                  )}
-                />
-                <Tooltip.Content data-localization="notification.actions.unarchive.tooltip">
-                  {t('notification.actions.unarchive.tooltip')}
-                </Tooltip.Content>
-              </Tooltip.Root>
-            </Show>
-          </div>
+            }
+          >
+            {(renderSubject) => <ExternalElementRenderer render={(el) => renderSubject()(el, props.notification)} />}
+          </Show>
+          <Show
+            when={props.renderBody}
+            fallback={
+              <Markdown
+                appearanceKey="notificationBody"
+                strongAppearanceKey="notificationBody__strong"
+                emAppearanceKey="notificationBody__em"
+                class="nt-text-start nt-whitespace-pre-wrap nt-text-foreground-alpha-600 [word-break:break-word]"
+                context={{ notification: props.notification }}
+              >
+                {props.notification.body}
+              </Markdown>
+            }
+          >
+            {(renderBody) => <ExternalElementRenderer render={(el) => renderBody()(el, props.notification)} />}
+          </Show>
         </div>
-        <Show when={props.notification.subject}>
-          {(subject) => (
-            <Markdown
-              class={style('notificationSubject', 'nt-text-start')}
-              strongAppearanceKey="notificationSubject__strong"
+
+        <Show
+          when={props.renderDefaultActions}
+          fallback={
+            <div
+              class={style({
+                key: 'notificationDefaultActions',
+                className: `nt-absolute nt-transition nt-duration-100 nt-ease-out nt-gap-0.5 nt-flex nt-shrink-0 nt-opacity-0 group-hover:nt-opacity-100 group-focus-within:nt-opacity-100 nt-justify-center nt-items-center nt-bg-background/90 nt-right-3 nt-top-3 nt-border nt-border-neutral-alpha-100 nt-rounded-lg nt-backdrop-blur-lg nt-p-0.5`,
+                context: { notification: props.notification } satisfies Parameters<
+                  InboxAppearanceCallback['notificationDefaultActions']
+                >[0],
+              })}
             >
-              {subject()}
-            </Markdown>
+              {renderNotificationActions(props.notification, status)}
+            </div>
+          }
+        >
+          {(renderDefaultActions) => (
+            <ExternalElementRenderer render={(el) => renderDefaultActions()(el, props.notification)} />
           )}
         </Show>
-        <Markdown class={style('notificationBody', 'nt-text-start')} strongAppearanceKey="notificationBody__strong">
-          {props.notification.body}
-        </Markdown>
-        <div class={style('notificationCustomActions', 'nt-flex nt-flex-wrap nt-gap-4 nt-mt-4')}>
-          <Show when={props.notification.primaryAction} keyed>
-            {(primaryAction) => (
-              <Button
-                appearanceKey="notificationPrimaryAction__button"
-                variant="default"
-                onClick={(e) => handleActionButtonClick(ActionTypeEnum.PRIMARY, e)}
+
+        <Show
+          when={props.renderCustomActions}
+          fallback={
+            <Show when={props.notification.primaryAction || props.notification.secondaryAction}>
+              <div
+                class={style({
+                  key: 'notificationCustomActions',
+                  className: 'nt-flex nt-flex-wrap nt-gap-2',
+                  context: { notification: props.notification } satisfies Parameters<
+                    InboxAppearanceCallback['notificationCustomActions']
+                  >[0],
+                })}
               >
-                {primaryAction.label}
-              </Button>
-            )}
-          </Show>
-          <Show when={props.notification.secondaryAction} keyed>
-            {(secondaryAction) => (
-              <Button
-                appearanceKey="notificationSecondaryAction__button"
-                variant="secondary"
-                onClick={(e) => handleActionButtonClick(ActionTypeEnum.SECONDARY, e)}
-              >
-                {secondaryAction.label}
-              </Button>
+                <Show when={props.notification.primaryAction} keyed>
+                  {(primaryAction) => (
+                    <Button
+                      appearanceKey="notificationPrimaryAction__button"
+                      variant="default"
+                      onClick={(e) => handleActionButtonClick(ActionTypeEnum.PRIMARY, e)}
+                      context={{ notification: props.notification }}
+                    >
+                      {primaryAction.label}
+                    </Button>
+                  )}
+                </Show>
+                <Show when={props.notification.secondaryAction} keyed>
+                  {(secondaryAction) => (
+                    <Button
+                      appearanceKey="notificationSecondaryAction__button"
+                      variant="secondary"
+                      onClick={(e) => handleActionButtonClick(ActionTypeEnum.SECONDARY, e)}
+                      context={{ notification: props.notification }}
+                    >
+                      {secondaryAction.label}
+                    </Button>
+                  )}
+                </Show>
+              </div>
+            </Show>
+          }
+        >
+          {(renderCustomActions) => (
+            <ExternalElementRenderer render={(el) => renderCustomActions()(el, props.notification)} />
+          )}
+        </Show>
+
+        <div
+          class={style({
+            key: 'notificationDate',
+            className: 'nt-text-foreground-alpha-400 nt-flex nt-items-center nt-gap-1',
+            context: { notification: props.notification } satisfies Parameters<
+              InboxAppearanceCallback['notificationDate']
+            >[0],
+          })}
+        >
+          <Show
+            when={snoozedUntil()}
+            fallback={
+              <Show when={deliveredAt()} fallback={createdAt()}>
+                {(deliveredAt) => (
+                  <Show when={deliveredAt().length >= 2} fallback={createdAt()}>
+                    {' '}
+                    <For each={deliveredAt().slice(-2)}>
+                      {(date, index) => (
+                        <>
+                          <Show when={index() === 0}>{date} ·</Show>
+                          <Show when={index() === 1}>
+                            <Badge
+                              appearanceKey="notificationDeliveredAt__badge"
+                              context={{ notification: props.notification }}
+                            >
+                              <IconRendererWrapper
+                                iconKey="clock"
+                                class={style({
+                                  key: 'notificationDeliveredAt__icon',
+                                  className: 'nt-size-3',
+                                  iconKey: 'clock',
+                                  context: { notification: props.notification } satisfies Parameters<
+                                    InboxAppearanceCallback['notificationDeliveredAt__icon']
+                                  >[0],
+                                })}
+                                fallback={
+                                  <DefaultClock
+                                    class={style({
+                                      key: 'notificationDeliveredAt__icon',
+                                      className: 'nt-size-3',
+                                      iconKey: 'clock',
+                                      context: { notification: props.notification } satisfies Parameters<
+                                        InboxAppearanceCallback['notificationDeliveredAt__icon']
+                                      >[0],
+                                    })}
+                                  />
+                                }
+                              />
+                              {date}
+                            </Badge>
+                          </Show>
+                        </>
+                      )}
+                    </For>
+                  </Show>
+                )}
+              </Show>
+            }
+          >
+            {(snoozedUntil) => (
+              <>
+                <IconRendererWrapper
+                  iconKey="clock"
+                  class={style({
+                    key: 'notificationSnoozedUntil__icon',
+                    className: 'nt-size-3',
+                    iconKey: 'clock',
+                    context: { notification: props.notification } satisfies Parameters<
+                      InboxAppearanceCallback['notificationSnoozedUntil__icon']
+                    >[0],
+                  })}
+                  fallback={
+                    <DefaultClock
+                      class={style({
+                        key: 'notificationSnoozedUntil__icon',
+                        className: 'nt-size-3',
+                        iconKey: 'clock',
+                        context: { notification: props.notification } satisfies Parameters<
+                          InboxAppearanceCallback['notificationSnoozedUntil__icon']
+                        >[0],
+                      })}
+                    />
+                  }
+                />
+                {t('notification.snoozedUntil')} · {snoozedUntil()}
+              </>
             )}
           </Show>
         </div>
+      </div>
+
+      <div class="nt-w-1.5 nt-flex nt-justify-center nt-shrink-0">
+        <Show when={!props.notification.isRead}>
+          <span
+            class={style({
+              key: 'notificationDot',
+              className: 'nt-size-1.5 nt-bg-primary nt-rounded-full',
+              context: { notification: props.notification } satisfies Parameters<
+                InboxAppearanceCallback['notificationDot']
+              >[0],
+            })}
+          />
+        </Show>
       </div>
     </a>
   );

@@ -1,20 +1,11 @@
-import { forwardRef, Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, forwardRef, Inject, Injectable } from '@nestjs/common';
+import { IntegrationEntity, IntegrationRepository, SubscriberEntity, SubscriberRepository } from '@novu/dal';
+import { FeatureFlagsKeysEnum, IChannelSettings } from '@novu/shared';
 import { isEqual } from 'lodash';
-import {
-  IChannelSettings,
-  SubscriberRepository,
-  IntegrationRepository,
-  SubscriberEntity,
-  IntegrationEntity,
-} from '@novu/dal';
-
+import { AnalyticsService, buildSubscriberKey, InvalidateCacheService } from '../../../services';
+import { FeatureFlagsService } from '../../../services/feature-flags';
+import { SYSTEM_LIMITS } from '../../../services/resource-validator.service';
 import { UpdateSubscriberChannelCommand } from './update-subscriber-channel.command';
-import { ApiException } from '../../../utils/exceptions';
-import {
-  AnalyticsService,
-  buildSubscriberKey,
-  InvalidateCacheService,
-} from '../../../services';
 
 @Injectable()
 export class UpdateSubscriberChannel {
@@ -25,18 +16,16 @@ export class UpdateSubscriberChannel {
     private integrationRepository: IntegrationRepository,
     @Inject(forwardRef(() => AnalyticsService))
     private analyticsService: AnalyticsService,
+    private featureFlagsService: FeatureFlagsService
   ) {}
 
   async execute(command: UpdateSubscriberChannelCommand) {
     const foundSubscriber =
       command.subscriber ??
-      (await this.subscriberRepository.findBySubscriberId(
-        command.environmentId,
-        command.subscriberId,
-      ));
+      (await this.subscriberRepository.findBySubscriberId(command.environmentId, command.subscriberId));
 
     if (!foundSubscriber) {
-      throw new ApiException(`SubscriberId: ${command.subscriberId} not found`);
+      throw new BadRequestException(`SubscriberId: ${command.subscriberId} not found`);
     }
 
     const query: Partial<IntegrationEntity> & { _environmentId: string } = {
@@ -48,25 +37,20 @@ export class UpdateSubscriberChannel {
       query.identifier = command.integrationIdentifier;
     }
 
-    const foundIntegration = await this.integrationRepository.findOne(
-      query,
-      undefined,
-      {
-        query: { sort: { createdAt: -1 } },
-      },
-    );
+    const foundIntegration = await this.integrationRepository.findOne(query, undefined, {
+      query: { sort: { createdAt: -1 } },
+    });
 
     if (!foundIntegration) {
-      throw new ApiException(
-        `Subscribers environment (${command.environmentId}) do not have active ${command.providerId} integration.`,
+      throw new BadRequestException(
+        `Subscribers environment (${command.environmentId}) do not have active ${command.providerId} integration.`
       );
     }
     const updatePayload = this.createUpdatePayload(command);
 
     const existingChannel = foundSubscriber?.channels?.find(
       (subscriberChannel) =>
-        subscriberChannel.providerId === command.providerId &&
-        subscriberChannel._integrationId === foundIntegration._id,
+        subscriberChannel.providerId === command.providerId && subscriberChannel._integrationId === foundIntegration._id
     );
 
     if (existingChannel) {
@@ -76,30 +60,22 @@ export class UpdateSubscriberChannel {
         updatePayload,
         foundSubscriber,
         command.isIdempotentOperation,
+        command.organizationId
       );
     } else {
-      await this.addChannelToSubscriber(
-        updatePayload,
-        foundIntegration,
-        command,
-        foundSubscriber,
-      );
+      await this.addChannelToSubscriber(updatePayload, foundIntegration, command, foundSubscriber);
     }
 
-    this.analyticsService.mixpanelTrack(
-      'Set Subscriber Credentials - [Subscribers]',
-      '',
-      {
-        providerId: command.providerId,
-        _organization: command.organizationId,
-        oauthHandler: command.oauthHandler,
-        _subscriberId: foundSubscriber._id,
-      },
-    );
+    this.analyticsService.mixpanelTrack('Set Subscriber Credentials - [Subscribers]', '', {
+      providerId: command.providerId,
+      _organization: command.organizationId,
+      oauthHandler: command.oauthHandler,
+      _subscriberId: foundSubscriber._id,
+    });
 
     return (await this.subscriberRepository.findBySubscriberId(
       command.environmentId,
-      command.subscriberId,
+      command.subscriberId
     )) as SubscriberEntity;
   }
 
@@ -107,12 +83,18 @@ export class UpdateSubscriberChannel {
     updatePayload: Partial<IChannelSettings>,
     foundIntegration,
     command: UpdateSubscriberChannelCommand,
-    foundSubscriber,
+    foundSubscriber
   ) {
-    // eslint-disable-next-line no-param-reassign
     updatePayload._integrationId = foundIntegration._id;
-    // eslint-disable-next-line no-param-reassign
     updatePayload.providerId = command.providerId;
+
+    if (updatePayload.credentials?.deviceTokens?.length) {
+      await this.validateDeviceTokensLimit(
+        updatePayload.credentials.deviceTokens,
+        command.environmentId,
+        command.organizationId
+      );
+    }
 
     await this.invalidateCache.invalidateByKey({
       key: buildSubscriberKey({
@@ -127,7 +109,7 @@ export class UpdateSubscriberChannel {
         $push: {
           channels: updatePayload,
         },
-      },
+      }
     );
   }
 
@@ -137,11 +119,9 @@ export class UpdateSubscriberChannel {
     updatePayload: Partial<IChannelSettings>,
     foundSubscriber: SubscriberEntity,
     isIdempotentOperation: boolean,
+    organizationId: string
   ) {
-    const equal = isEqual(
-      existingChannel.credentials,
-      updatePayload.credentials,
-    );
+    const equal = isEqual(existingChannel.credentials, updatePayload.credentials);
 
     if (equal) {
       return;
@@ -151,16 +131,15 @@ export class UpdateSubscriberChannel {
 
     if (updatePayload.credentials?.deviceTokens) {
       if (isIdempotentOperation) {
-        deviceTokens = this.unionDeviceTokens(
-          [],
-          updatePayload.credentials.deviceTokens,
-        );
+        deviceTokens = this.unionDeviceTokens([], updatePayload.credentials.deviceTokens);
       } else {
         deviceTokens = this.unionDeviceTokens(
           existingChannel.credentials.deviceTokens ?? [],
-          updatePayload.credentials.deviceTokens,
+          updatePayload.credentials.deviceTokens
         );
       }
+
+      await this.validateDeviceTokensLimit(deviceTokens, environmentId, organizationId);
     }
 
     await this.invalidateCache.invalidateByKey({
@@ -170,11 +149,7 @@ export class UpdateSubscriberChannel {
       }),
     });
 
-    const mappedChannel: IChannelSettings = this.mapChannel(
-      updatePayload,
-      existingChannel,
-      deviceTokens,
-    );
+    const mappedChannel: IChannelSettings = this.mapChannel(updatePayload, existingChannel, deviceTokens);
 
     await this.subscriberRepository.update(
       {
@@ -182,18 +157,17 @@ export class UpdateSubscriberChannel {
         _id: foundSubscriber,
         'channels._integrationId': existingChannel._integrationId,
       },
-      { $set: { 'channels.$': mappedChannel } },
+      { $set: { 'channels.$': mappedChannel } }
     );
   }
 
   private mapChannel(
     updatePayload: Partial<IChannelSettings>,
     existingChannel: IChannelSettings,
-    deviceTokens: string[],
+    deviceTokens: string[]
   ): IChannelSettings {
     return {
-      _integrationId:
-        updatePayload._integrationId || existingChannel._integrationId,
+      _integrationId: updatePayload._integrationId || existingChannel._integrationId,
       providerId: updatePayload.providerId || existingChannel.providerId,
       credentials: {
         ...existingChannel.credentials,
@@ -203,14 +177,31 @@ export class UpdateSubscriberChannel {
     };
   }
 
-  private unionDeviceTokens(
-    existingDeviceTokens: string[],
-    updateDeviceTokens: string[],
-  ): string[] {
-    // in order to not have breaking change we will support [] update
+  private unionDeviceTokens(existingDeviceTokens: string[], updateDeviceTokens: string[]): string[] {
     if (updateDeviceTokens?.length === 0) return [];
 
     return [...new Set([...existingDeviceTokens, ...updateDeviceTokens])];
+  }
+
+  private async validateDeviceTokensLimit(
+    deviceTokens: string[],
+    environmentId: string,
+    organizationId: string
+  ): Promise<void> {
+    const maxTokens = await this.featureFlagsService.getFlag({
+      key: FeatureFlagsKeysEnum.MAX_SUBSCRIBER_DEVICE_TOKENS_NUMBER,
+      environment: { _id: environmentId },
+      organization: { _id: organizationId },
+      defaultValue: SYSTEM_LIMITS.SUBSCRIBER_DEVICE_TOKENS,
+    });
+
+    if (deviceTokens.length > maxTokens) {
+      throw new BadRequestException({
+        message: `Device tokens limit exceeded. Maximum allowed tokens per subscriber channel is ${maxTokens}, but got ${deviceTokens.length} tokens.`,
+        currentCount: deviceTokens.length,
+        limit: maxTokens,
+      });
+    }
   }
 
   private createUpdatePayload(command: UpdateSubscriberChannelCommand) {
@@ -222,13 +213,8 @@ export class UpdateSubscriberChannel {
       if (command.credentials.webhookUrl != null && updatePayload.credentials) {
         updatePayload.credentials.webhookUrl = command.credentials.webhookUrl;
       }
-      if (
-        command.credentials.deviceTokens != null &&
-        updatePayload.credentials
-      ) {
-        updatePayload.credentials.deviceTokens = [
-          ...new Set([...command.credentials.deviceTokens]),
-        ];
+      if (command.credentials.deviceTokens != null && updatePayload.credentials) {
+        updatePayload.credentials.deviceTokens = [...new Set([...command.credentials.deviceTokens])];
       }
       if (command.credentials.channel != null && updatePayload.credentials) {
         updatePayload.credentials.channel = command.credentials.channel;

@@ -1,14 +1,17 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
-import { DalService, SubscriberRepository, NotificationRepository, MessageRepository } from '@novu/dal';
 import {
   AnalyticsService,
+  createNestLoggingModuleOptions,
   DalServiceHealthIndicator,
-  WebSocketsInMemoryProviderService,
+  LoggerModule,
   QueuesModule,
+  WebSocketsInMemoryProviderService,
 } from '@novu/application-generic';
+import { DalService, MessageRepository, NotificationRepository, SubscriberRepository } from '@novu/dal';
 
 import { JobTopicNameEnum } from '@novu/shared';
+import packageJson from '../../package.json';
 import { SubscriberOnlineService } from './subscriber-online';
 
 const DAL_MODELS = [SubscriberRepository, NotificationRepository, MessageRepository];
@@ -44,6 +47,12 @@ const PROVIDERS = [
 
 @Module({
   imports: [
+    LoggerModule.forRoot(
+      createNestLoggingModuleOptions({
+        serviceName: packageJson.name,
+        version: packageJson.version,
+      })
+    ),
     QueuesModule.forRoot([JobTopicNameEnum.WEB_SOCKETS]),
     JwtModule.register({
       secretOrKeyProvider: () => process.env.JWT_SECRET as string,
@@ -53,6 +62,6 @@ const PROVIDERS = [
     }),
   ],
   providers: [...PROVIDERS],
-  exports: [...PROVIDERS, JwtModule, QueuesModule],
+  exports: [...PROVIDERS, JwtModule, LoggerModule, QueuesModule],
 })
 export class SharedModule {}

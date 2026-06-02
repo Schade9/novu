@@ -1,12 +1,11 @@
-import { vi, describe, test, expect, afterEach } from 'vitest';
+import { fail } from 'assert';
 
 import nodemailer from 'nodemailer';
 import { ConnectionOptions } from 'tls';
-import { fail } from 'assert';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { NodemailerProvider } from './nodemailer.provider';
 
 const sendMailMock = vi.fn().mockReturnValue(() => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return {} as any;
 });
 
@@ -56,6 +55,8 @@ describe.skip('NodemailerProvider', () => {
         host: config.host,
         port: config.port,
         secure: config.secure,
+        connectionTimeout: 10000,
+        socketTimeout: 10000,
         auth: undefined,
         dkim: undefined,
         ignoreTls: undefined,
@@ -108,6 +109,8 @@ describe.skip('NodemailerProvider', () => {
         host: mockConfig.host,
         port: mockConfig.port,
         secure: mockConfig.secure,
+        connectionTimeout: 10000,
+        socketTimeout: 10000,
         auth: {
           user: mockConfig.user,
           pass: mockConfig.password,
@@ -188,16 +191,81 @@ describe.skip('NodemailerProvider', () => {
 
     test('should throw an error if TLS options are not a valid JSON', () => {
       try {
-        const provider = new NodemailerProvider({
+        new NodemailerProvider({
           ...mockConfig,
           tlsOptions: (() => {}) as unknown as ConnectionOptions,
         });
         fail('Should not reach here');
       } catch (error) {
         expect(error.message).toBe(
-          'TLS options is not a valid JSON. Check again the value set for NODEMAILER_TLS_OPTIONS',
+          'TLS options is not a valid JSON. Check again the value set for NODEMAILER_TLS_OPTIONS'
         );
       }
     });
+  });
+});
+
+describe('NodemailerProvider header forwarding', () => {
+  const mockConfig = {
+    host: 'test.test.email',
+    port: 587,
+    secure: false,
+    from: 'test@test.com',
+    senderName: 'John Doe',
+    user: 'test@test.com',
+    password: 'test123',
+  };
+
+  test('should forward custom headers to sendMail', async () => {
+    const provider = new NodemailerProvider(mockConfig);
+    const spy = vi.spyOn(provider['transports'], 'sendMail').mockResolvedValue({ messageId: 'test-id' } as any);
+
+    await provider.sendMessage({
+      ...mockNovuMessage,
+      headers: {
+        'In-Reply-To': '<original-message-id@example.com>',
+        References: '<original-message-id@example.com>',
+      },
+    });
+
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headers: {
+          'In-Reply-To': '<original-message-id@example.com>',
+          References: '<original-message-id@example.com>',
+        },
+      })
+    );
+  });
+
+  test('should forward custom MIME alternatives to sendMail', async () => {
+    const provider = new NodemailerProvider(mockConfig);
+    const spy = vi.spyOn(provider['transports'], 'sendMail').mockResolvedValue({ messageId: 'test-id' } as any);
+    const reactionAlternative = {
+      contentType: 'text/vnd.google.email-reaction+json',
+      content: JSON.stringify({ version: 1, emoji: '👀' }),
+    };
+
+    await provider.sendMessage({
+      ...mockNovuMessage,
+      alternatives: [reactionAlternative],
+    });
+
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        alternatives: [reactionAlternative],
+      })
+    );
+  });
+
+  test('should not include headers field when no custom headers provided', async () => {
+    const provider = new NodemailerProvider(mockConfig);
+    const spy = vi.spyOn(provider['transports'], 'sendMail').mockResolvedValue({ messageId: 'test-id' } as any);
+
+    await provider.sendMessage(mockNovuMessage);
+
+    const payload = spy.mock.calls[0][0] as Record<string, unknown>;
+
+    expect(payload).not.toHaveProperty('headers');
   });
 });

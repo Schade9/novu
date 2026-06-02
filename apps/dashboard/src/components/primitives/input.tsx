@@ -1,10 +1,9 @@
 import { Slot } from '@radix-ui/react-slot';
 import * as React from 'react';
-
+import { IconType } from 'react-icons';
 import type { PolymorphicComponentProps } from '@/utils/polymorphic';
 import { recursiveCloneChildren } from '@/utils/recursive-clone-children';
 import { tv, type VariantProps } from '@/utils/tv';
-import { IconType } from 'react-icons';
 import { AUTOCOMPLETE_PASSWORD_MANAGERS_OFF } from '../../utils/constants';
 
 const INPUT_ROOT_NAME = 'InputRoot';
@@ -18,7 +17,8 @@ export const inputVariants = tv({
   slots: {
     root: [
       // base
-      'group relative flex w-full overflow-hidden bg-bg-white-0 text-text-strong shadow-xs',
+      'ring-stroke-soft',
+      'group relative flex w-full overflow-hidden bg-bg-white text-text-strong shadow-xs',
       'transition duration-200 ease-out',
       'divide-x divide-stroke-soft',
       // before
@@ -28,9 +28,12 @@ export const inputVariants = tv({
       // hover
       'hover:shadow-none',
       // focus
-      'has-[input:focus]:shadow-button-important-focus has-[input:focus]:before:ring-stroke-strong',
+      'has-[input:focus]:border-stroke-soft has-[input:focus]:ring-stroke-soft/50 has-[input:focus]:ring-[3px]',
+      'focus-within:border-stroke-soft focus-within:ring-stroke-soft/50 focus-within:ring-[3px]',
       // disabled
       'has-[input:disabled]:shadow-none',
+      // aria-invalid
+      'aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive',
     ],
     wrapper: [
       // base
@@ -43,14 +46,19 @@ export const inputVariants = tv({
     ],
     input: [
       // base
-      'w-full bg-transparent bg-none text-paragraph-sm text-text-strong outline-none',
+      'w-full bg-transparent bg-none text-paragraph-sm text-text-strong outline-hidden',
       'transition duration-200 ease-out',
+      // horizontal scroll with fade gradient
+      'overflow-x-auto scrollbar-thin',
+      'mask-[linear-gradient(to_right,black_calc(100%-1.5rem),transparent)]',
+      'mask-size-[100%_100%]',
+      'mask-no-repeat',
       // placeholder
       'placeholder:select-none placeholder:text-text-soft placeholder:transition placeholder:duration-200 placeholder:ease-out',
       // hover placeholder
       'group-hover/input-wrapper:placeholder:text-text-sub',
       // focus
-      'focus:outline-none',
+      'focus:outline-hidden',
       // focus placeholder
       'group-has-[input:focus]:placeholder:text-text-sub',
       // disabled
@@ -61,13 +69,13 @@ export const inputVariants = tv({
       'flex size-5 shrink-0 select-none items-center justify-center',
       'transition duration-200 ease-out',
       // placeholder state
-      'group-has-[:placeholder-shown]:text-text-soft',
+      'group-has-placeholder-shown:text-text-soft',
       // filled state
       'text-text-sub',
       // hover
-      'group-has-[:placeholder-shown]:group-hover/input-wrapper:text-text-sub',
+      'group-hover/input-wrapper:group-has-placeholder-shown:text-text-sub',
       // focus
-      'group-has-[:placeholder-shown]:group-has-[input:focus]/input-wrapper:text-text-sub',
+      'group-has-[input:focus]/input-wrapper:group-has-placeholder-shown:text-text-sub',
       // disabled
       'group-has-[input:disabled]/input-wrapper:text-text-disabled',
     ],
@@ -77,17 +85,17 @@ export const inputVariants = tv({
       'flex items-center justify-center truncate',
       'transition duration-200 ease-out',
       // placeholder state
-      'group-has-[:placeholder-shown]:text-text-soft',
+      'group-has-placeholder-shown:text-text-soft',
       // focus state
-      'group-has-[:placeholder-shown]:group-has-[input:focus]:text-text-sub',
+      'group-has-[input:focus]:group-has-placeholder-shown:text-text-sub',
     ],
     inlineAffix: [
       // base
       'text-paragraph-sm text-text-sub',
       // placeholder state
-      'group-has-[:placeholder-shown]:text-text-soft',
+      'group-has-placeholder-shown:text-text-soft',
       // focus state
-      'group-has-[:placeholder-shown]:group-has-[input:focus]:text-text-sub',
+      'group-has-[input:focus]:group-has-placeholder-shown:text-text-sub',
     ],
   },
   variants: {
@@ -100,7 +108,7 @@ export const inputVariants = tv({
       sm: {
         root: 'rounded-lg',
         wrapper: 'gap-2 px-2.5',
-        input: 'h-9 text-paragraph-xs',
+        input: 'h-[2.35rem] text-paragraph-xs',
         affix: 'text-paragraph-xs',
         inlineAffix: 'text-paragraph-xs',
       },
@@ -125,9 +133,10 @@ export const inputVariants = tv({
           // base
           'before:ring-error-base',
           // base
-          'hover:before:ring-error-base hover:[&:not(&:has(input:focus)):has(>:only-child)]:before:ring-error-base',
+          'hover:before:ring-error-base [&:not(&:has(input:focus)):has(>:only-child)]:hover:before:ring-error-base',
           // focus
-          'has-[input:focus]:shadow-button-error-focus has-[input:focus]:before:ring-error-base',
+          'has-[input:focus]:border-destructive has-[input:focus]:ring-destructive/20 dark:has-[input:focus]:ring-destructive/40',
+          'focus-within:border-destructive focus-within:ring-destructive/20 dark:focus-within:ring-destructive/40',
         ],
       },
       false: {
@@ -218,6 +227,7 @@ function InputWrapper({
     </Component>
   );
 }
+
 InputWrapper.displayName = INPUT_WRAPPER_NAME;
 
 const InputEl = React.forwardRef<
@@ -277,7 +287,7 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
   ) => {
     return (
       <InputRoot size={size} hasError={hasError}>
-        {leadingNode}
+        {leadingNode && <div className="flex flex-col justify-center gap-1">{leadingNode}</div>}
         <InputWrapper>
           {inlineLeadingNode}
           {LeadingIcon && <InputIcon as={LeadingIcon} />}
@@ -285,7 +295,7 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
           {TrailingIcon && <InputIcon as={TrailingIcon} />}
           {inlineTrailingNode}
         </InputWrapper>
-        {trailingNode}
+        {trailingNode && <div className="flex flex-col justify-center gap-1">{trailingNode}</div>}
       </InputRoot>
     );
   }
@@ -305,6 +315,7 @@ function InputIcon<T extends React.ElementType = 'div'>({
 
   return <Component className={icon({ class: className })} {...rest} />;
 }
+
 InputIcon.displayName = INPUT_ICON_NAME;
 
 function InputAffix({
@@ -325,6 +336,7 @@ function InputAffix({
     </div>
   );
 }
+
 InputAffix.displayName = INPUT_AFFIX_NAME;
 
 function InputInlineAffix({
@@ -345,6 +357,7 @@ function InputInlineAffix({
     </span>
   );
 }
+
 InputInlineAffix.displayName = INPUT_INLINE_AFFIX_NAME;
 
 export {
@@ -353,7 +366,7 @@ export {
   InputInlineAffix as InlineAffix,
   Input,
   InputEl as InputPure,
-  InputRoot as InputRoot,
-  InputWrapper as InputWrapper,
+  InputRoot,
+  InputWrapper,
   type InputProps,
 };

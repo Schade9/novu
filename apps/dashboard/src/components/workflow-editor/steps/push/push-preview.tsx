@@ -1,6 +1,6 @@
-import { HTMLAttributes } from 'react';
-import { HTMLMotionProps, motion } from 'motion/react';
 import { ChannelTypeEnum, GeneratePreviewResponseDto, PushRenderOutput } from '@novu/shared';
+import { HTMLMotionProps, motion } from 'motion/react';
+import { HTMLAttributes } from 'react';
 import { Skeleton } from '@/components/primitives/skeleton';
 import { cn } from '@/utils/ui';
 
@@ -11,9 +11,9 @@ export function PushPreview({
   isPreviewPending: boolean;
   previewData?: GeneratePreviewResponseDto;
 }) {
-  const isValidPushPreview = previewData?.result.type === ChannelTypeEnum.PUSH;
-  const subject = isValidPushPreview ? ((previewData?.result.preview as PushRenderOutput)?.subject ?? '') : '';
-  const body = isValidPushPreview ? ((previewData?.result.preview as PushRenderOutput)?.body ?? '') : '';
+  const isValidPushPreview = previewData?.result?.type === ChannelTypeEnum.PUSH;
+  const subject = isValidPushPreview ? ((previewData?.result?.preview as PushRenderOutput)?.subject ?? '') : '';
+  const body = isValidPushPreview ? ((previewData?.result?.preview as PushRenderOutput)?.body ?? '') : '';
 
   if (isPreviewPending) {
     return (
@@ -46,13 +46,14 @@ type PushSubjectPreviewProps = HTMLAttributes<HTMLDivElement> & {
   subject?: string;
   isPending: boolean;
 };
-export const PushSubjectPreview = ({ subject, isPending, className, ...rest }: PushSubjectPreviewProps) => {
+
+const PushSubjectPreview = ({ subject, isPending, className, ...rest }: PushSubjectPreviewProps) => {
   if (isPending) {
     return <Skeleton className="h-3 w-2/3" />;
   }
 
   return (
-    <div className={cn('flex items-center gap-1.5', className)} {...rest}>
+    <div className={cn('flex items-center gap-1.5 whitespace-pre-wrap', className)} {...rest}>
       <div className="flex-1">
         <span className="line-clamp-1 min-h-4 text-xs font-medium">{subject}</span>
       </div>
@@ -65,10 +66,11 @@ type PushBodyPreviewProps = HTMLAttributes<HTMLDivElement> & {
   body?: string;
   isPending: boolean;
 };
-export const PushBodyPreview = ({ body, isPending, className, ...rest }: PushBodyPreviewProps) => {
+
+const PushBodyPreview = ({ body, isPending, className, ...rest }: PushBodyPreviewProps) => {
   if (isPending) {
     return (
-      <div className="flex flex-col gap-1" {...rest}>
+      <div className="flex flex-col gap-1 whitespace-pre-wrap" {...rest}>
         <Skeleton className="h-3 w-full" />
         <Skeleton className="h-3 w-2/3" />
       </div>
@@ -82,7 +84,7 @@ export const PushBodyPreview = ({ body, isPending, className, ...rest }: PushBod
   );
 };
 
-export const PushContentContainerPreview = ({ children, className, ...rest }: HTMLMotionProps<'div'>) => {
+const PushContentContainerPreview = ({ children, className, ...rest }: HTMLMotionProps<'div'>) => {
   return (
     <motion.div
       initial={{ opacity: 0, y: -10 }}
@@ -97,9 +99,9 @@ export const PushContentContainerPreview = ({ children, className, ...rest }: HT
   );
 };
 
-export const PushBackgroundWithPhone = ({ children, className, ...rest }: HTMLAttributes<HTMLDivElement>) => {
+const PushBackgroundWithPhone = ({ children, className, ...rest }: HTMLAttributes<HTMLDivElement>) => {
   return (
-    <div className="flex items-center justify-center">
+    <div className="flex items-center justify-center w-full">
       <div
         className={cn("relative h-60 w-full max-w-72 bg-[url('/images/phones/iphone-push.svg')] bg-cover", className)}
         {...rest}
@@ -110,7 +112,7 @@ export const PushBackgroundWithPhone = ({ children, className, ...rest }: HTMLAt
   );
 };
 
-export const PushNotificationContainer = ({ children, className, ...rest }: HTMLAttributes<HTMLDivElement>) => {
+const PushNotificationContainer = ({ children, className, ...rest }: HTMLAttributes<HTMLDivElement>) => {
   return (
     <div className={cn('absolute bottom-5 left-1/2 z-10 w-11/12 -translate-x-1/2 p-2', className)} {...rest}>
       {children}
