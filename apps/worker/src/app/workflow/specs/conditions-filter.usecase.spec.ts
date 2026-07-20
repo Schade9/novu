@@ -1,4 +1,10 @@
 import { CompileTemplate, ConditionsFilter, ConditionsFilterCommand } from '@novu/application-generic';
+
+// The top-level @novu/application-generic re-exports helpers via Object.defineProperty
+// getters, which sinon cannot replace. Stub the underlying source module instead — the
+// re-export getter delegates to it so backend code picks up the stub.
+const ssrfUrlValidationModule = require('@novu/application-generic/build/main/utils/ssrf-url-validation');
+
 import { JobEntity, MessageTemplateEntity, NotificationStepEntity } from '@novu/dal';
 import {
   BuilderGroupValues,
@@ -10,7 +16,6 @@ import {
   StepTypeEnum,
   TimeOperatorEnum,
 } from '@novu/shared';
-import axios from 'axios';
 import { expect } from 'chai';
 import { Duration, sub } from 'date-fns';
 import sinon from 'sinon';
@@ -18,6 +23,7 @@ import sinon from 'sinon';
 describe('Message filter matcher', () => {
   const executionLogQueueService = {
     add: sinon.stub(),
+    execute: sinon.stub().resolves(),
   };
   const conditionsFilter = new ConditionsFilter(
     undefined as any,
@@ -305,6 +311,185 @@ describe('Message filter matcher', () => {
     expect(matchedMessage.passed).to.equal(true);
   });
 
+  it('should handle IN operator when payload field is missing', async () => {
+    const matchedMessage = await conditionsFilter.filter(
+      mapConditionsFilterCommand({
+        step: makeStep('Missing Field', FieldLogicalOperatorEnum.AND, [
+          {
+            operator: FieldOperatorEnum.IN,
+            value: 'premium',
+            field: 'tags',
+            on: FilterPartTypeEnum.PAYLOAD,
+          },
+        ]),
+        variables: {
+          payload: {},
+        },
+      })
+    );
+
+    expect(matchedMessage.passed).to.equal(false);
+  });
+
+  it('should handle NOT_IN operator when payload field is missing', async () => {
+    const matchedMessage = await conditionsFilter.filter(
+      mapConditionsFilterCommand({
+        step: makeStep('Missing Field', FieldLogicalOperatorEnum.AND, [
+          {
+            operator: FieldOperatorEnum.NOT_IN,
+            value: 'blocked',
+            field: 'tags',
+            on: FilterPartTypeEnum.PAYLOAD,
+          },
+        ]),
+        variables: {
+          payload: {},
+        },
+      })
+    );
+
+    expect(matchedMessage.passed).to.equal(true);
+  });
+
+  it('should handle IN operator when payload field is a string', async () => {
+    const matchedMessage = await conditionsFilter.filter(
+      mapConditionsFilterCommand({
+        step: makeStep('String Field', FieldLogicalOperatorEnum.AND, [
+          {
+            operator: FieldOperatorEnum.IN,
+            value: 'premium',
+            field: 'tags',
+            on: FilterPartTypeEnum.PAYLOAD,
+          },
+        ]),
+        variables: {
+          payload: {
+            tags: 'premium',
+          },
+        },
+      })
+    );
+
+    expect(matchedMessage.passed).to.equal(true);
+  });
+
+  it('should handle NOT_IN operator when payload field is a string', async () => {
+    const matchedMessage = await conditionsFilter.filter(
+      mapConditionsFilterCommand({
+        step: makeStep('String Field', FieldLogicalOperatorEnum.AND, [
+          {
+            operator: FieldOperatorEnum.NOT_IN,
+            value: 'blocked',
+            field: 'status',
+            on: FilterPartTypeEnum.PAYLOAD,
+          },
+        ]),
+        variables: {
+          payload: {
+            status: 'active',
+          },
+        },
+      })
+    );
+
+    expect(matchedMessage.passed).to.equal(true);
+  });
+
+  it('should handle IN operator with string substring matching for old dashboard variants', async () => {
+    const tutorNameMatch = await conditionsFilter.filter(
+      mapConditionsFilterCommand({
+        step: makeStep('Tutor Name', FieldLogicalOperatorEnum.AND, [
+          {
+            operator: FieldOperatorEnum.IN,
+            value: ' ',
+            field: 'classDetails.tutorName',
+            on: FilterPartTypeEnum.PAYLOAD,
+          },
+        ]),
+        variables: {
+          payload: {
+            classDetails: {
+              tutorName: 'Jane Smith',
+            },
+          },
+        },
+      })
+    );
+
+    expect(tutorNameMatch.passed).to.equal(true);
+
+    const enrollmentStatusMatch = await conditionsFilter.filter(
+      mapConditionsFilterCommand({
+        step: makeStep('Enrollment Status', FieldLogicalOperatorEnum.AND, [
+          {
+            operator: FieldOperatorEnum.IN,
+            value: 'requested',
+            field: 'enrollmentQueriesStatus',
+            on: FilterPartTypeEnum.PAYLOAD,
+          },
+        ]),
+        variables: {
+          payload: {
+            enrollmentQueriesStatus: 'requested',
+          },
+        },
+      })
+    );
+
+    expect(enrollmentStatusMatch.passed).to.equal(true);
+  });
+
+  it('should handle IN operator when payload field is not an array or string', async () => {
+    const matchedMessage = await conditionsFilter.filter(
+      mapConditionsFilterCommand({
+        step: makeStep('Non Array Field', FieldLogicalOperatorEnum.AND, [
+          {
+            operator: FieldOperatorEnum.IN,
+            value: 'premium',
+            field: 'tags',
+            on: FilterPartTypeEnum.PAYLOAD,
+          },
+        ]),
+        variables: {
+          payload: {
+            tags: 42,
+          },
+        },
+      })
+    );
+
+    expect(matchedMessage.passed).to.equal(false);
+  });
+
+  it('should fail closed when filter evaluation throws', async () => {
+    const processFilterEqualityStub = sinon
+      .stub(ConditionsFilter.prototype as any, 'processFilterEquality')
+      .throws(new TypeError('Cannot read properties of undefined (reading "includes")'));
+
+    const matchedMessage = await conditionsFilter.filter(
+      mapConditionsFilterCommand({
+        step: makeStep('Throws On Eval', FieldLogicalOperatorEnum.AND, [
+          {
+            operator: FieldOperatorEnum.EQUAL,
+            value: 'true',
+            field: 'varField',
+            on: FilterPartTypeEnum.PAYLOAD,
+          },
+        ]),
+        variables: {
+          payload: {
+            varField: true,
+          },
+        },
+      })
+    );
+
+    expect(matchedMessage.passed).to.equal(false);
+    expect(matchedMessage.conditions[0]?.passed).to.equal(false);
+
+    processFilterEqualityStub.restore();
+  });
+
   it('should check if key is defined or not in subscriber data', async () => {
     const matchedMessage = await conditionsFilter.filter(
       mapConditionsFilterCommand({
@@ -556,11 +741,12 @@ describe('Message filter matcher', () => {
   });
 
   it('should handle webhook filter', async () => {
-    const gotGetStub = sinon.stub(axios, 'post').resolves(
-      Promise.resolve({
-        data: { varField: true },
-      })
-    );
+    const safeRequestStub = sinon.stub(ssrfUrlValidationModule, 'safeOutboundJsonRequest').resolves({
+      statusCode: 200,
+      statusMessage: 'OK',
+      headers: {},
+      body: { varField: true },
+    } as any);
 
     const matchedMessage = await conditionsFilter.filter(
       mapConditionsFilterCommand({
@@ -570,7 +756,7 @@ describe('Message filter matcher', () => {
             value: 'true',
             field: 'varField',
             on: FilterPartTypeEnum.WEBHOOK,
-            webhookUrl: 'www.user.com/webhook',
+            webhookUrl: 'https://www.user.com/webhook',
           },
         ]),
         variables: { payload: {} },
@@ -579,15 +765,13 @@ describe('Message filter matcher', () => {
 
     expect(matchedMessage.passed).to.equal(true);
 
-    gotGetStub.restore();
+    safeRequestStub.restore();
   });
 
   it('should skip async filter if child under OR returned true', async () => {
-    const gotGetStub = sinon.stub(axios, 'post').resolves(
-      Promise.resolve({
-        body: '{"varField":true}',
-      })
-    );
+    const safeRequestStub = sinon
+      .stub(ssrfUrlValidationModule, 'safeOutboundJsonRequest')
+      .resolves({ statusCode: 200, statusMessage: 'OK', headers: {}, body: { varField: true } } as any);
 
     let matchedMessage = await conditionsFilter.filter(
       mapConditionsFilterCommand({
@@ -603,14 +787,14 @@ describe('Message filter matcher', () => {
             value: 'true',
             field: 'varField',
             on: FilterPartTypeEnum.WEBHOOK,
-            webhookUrl: 'www.user.com/webhook',
+            webhookUrl: 'https://www.user.com/webhook',
           },
         ]),
         variables: { payload: { payloadVarField: true } },
       })
     );
 
-    let requestsCount = gotGetStub.callCount;
+    let requestsCount = safeRequestStub.callCount;
 
     expect(requestsCount).to.equal(0);
     expect(matchedMessage.passed).to.equal(true);
@@ -625,7 +809,7 @@ describe('Message filter matcher', () => {
             value: 'true',
             field: 'varField',
             on: FilterPartTypeEnum.WEBHOOK,
-            webhookUrl: 'www.user.com/webhook',
+            webhookUrl: 'https://www.user.com/webhook',
           },
           {
             operator: FieldOperatorEnum.EQUAL,
@@ -638,20 +822,18 @@ describe('Message filter matcher', () => {
       })
     );
 
-    requestsCount = gotGetStub.callCount;
+    requestsCount = safeRequestStub.callCount;
 
     expect(requestsCount).to.equal(0);
     expect(matchedMessage.passed).to.equal(true);
 
-    gotGetStub.restore();
+    safeRequestStub.restore();
   });
 
   it('should skip async filter if child under AND returned false', async () => {
-    const gotGetStub = sinon.stub(axios, 'post').resolves(
-      Promise.resolve({
-        body: '{"varField":true}',
-      })
-    );
+    const safeRequestStub = sinon
+      .stub(ssrfUrlValidationModule, 'safeOutboundJsonRequest')
+      .resolves({ statusCode: 200, statusMessage: 'OK', headers: {}, body: { varField: true } } as any);
 
     let matchedMessage = await conditionsFilter.filter(
       mapConditionsFilterCommand({
@@ -667,14 +849,14 @@ describe('Message filter matcher', () => {
             value: 'true',
             field: 'varField',
             on: FilterPartTypeEnum.WEBHOOK,
-            webhookUrl: 'www.user.com/webhook',
+            webhookUrl: 'https://www.user.com/webhook',
           },
         ]),
         variables: { payload: { payloadVarField: false } },
       })
     );
 
-    let requestsCount = gotGetStub.callCount;
+    let requestsCount = safeRequestStub.callCount;
 
     expect(requestsCount).to.equal(0);
     expect(matchedMessage.passed).to.equal(false);
@@ -689,7 +871,7 @@ describe('Message filter matcher', () => {
             value: 'true',
             field: 'varField',
             on: FilterPartTypeEnum.WEBHOOK,
-            webhookUrl: 'www.user.com/webhook',
+            webhookUrl: 'https://www.user.com/webhook',
           },
           {
             operator: FieldOperatorEnum.EQUAL,
@@ -702,12 +884,12 @@ describe('Message filter matcher', () => {
       })
     );
 
-    requestsCount = gotGetStub.callCount;
+    requestsCount = safeRequestStub.callCount;
 
     expect(requestsCount).to.equal(0);
     expect(matchedMessage.passed).to.equal(false);
 
-    gotGetStub.restore();
+    safeRequestStub.restore();
   });
 
   describe('is online filters', () => {

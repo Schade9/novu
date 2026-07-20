@@ -15,6 +15,7 @@ import {
 import { ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
 import { RequirePermissions } from '@novu/application-generic';
 import { ApiRateLimitCategoryEnum, PermissionsEnum, UserSessionData } from '@novu/shared';
+import { ErrorDto } from '../../error-dto';
 import { RequireAuthentication } from '../auth/framework/auth.decorator';
 import { ExternalApiAccessible } from '../auth/framework/external-api.decorator';
 import { ThrottlerCategory } from '../rate-limiting/guards';
@@ -25,10 +26,9 @@ import {
   ApiNotFoundResponse,
   ApiResponse,
 } from '../shared/framework/response.decorator';
-
 import { SdkMethodName } from '../shared/framework/swagger/sdk.decorators';
-
 import { UserSession } from '../shared/framework/user.decorator';
+import { isEnvironmentScopedAuthScheme } from '../shared/utils/auth.utils';
 import {
   CreateEnvironmentVariableRequestDto,
   EnvironmentVariableResponseDto,
@@ -82,8 +82,10 @@ export class EnvironmentVariablesController {
     return this.getEnvironmentVariablesUsecase.execute(
       GetEnvironmentVariablesCommand.create({
         organizationId: user.organizationId,
+        environmentId: user.environmentId,
         userId: user._id,
         search: query.search,
+        scopeToEnvironment: isEnvironmentScopedAuthScheme(user.scheme),
       })
     );
   }
@@ -141,8 +143,10 @@ export class EnvironmentVariablesController {
     return this.getEnvironmentVariableUsecase.execute(
       GetEnvironmentVariableCommand.create({
         organizationId: user.organizationId,
+        environmentId: user.environmentId,
         userId: user._id,
         variableKey,
+        scopeToEnvironment: isEnvironmentScopedAuthScheme(user.scheme),
       })
     );
   }
@@ -150,6 +154,7 @@ export class EnvironmentVariablesController {
   @Post('/')
   @ExternalApiAccessible()
   @RequirePermissions(PermissionsEnum.WORKFLOW_WRITE)
+  @HttpCode(HttpStatus.OK)
   @ApiResponse(EnvironmentVariableResponseDto)
   @ApiOperation({
     summary: 'Create a variable',
@@ -158,18 +163,25 @@ export class EnvironmentVariablesController {
       'Secret variables are encrypted at rest and masked in API responses.',
   })
   @ApiConflictResponse({ description: 'An environment variable with the same key already exists.' })
+  @ApiResponse(ErrorDto, 400, false, false, {
+    description: 'A submitted value equals the public secret mask placeholder, which is reserved.',
+  })
   async createEnvironmentVariable(
     @UserSession() user: UserSessionData,
     @Body() body: CreateEnvironmentVariableRequestDto
   ): Promise<EnvironmentVariableResponseDto> {
+    const restrictToUserEnvironment = isEnvironmentScopedAuthScheme(user.scheme);
+
     return this.createEnvironmentVariableUsecase.execute(
       CreateEnvironmentVariableCommand.create({
         organizationId: user.organizationId,
+        environmentId: user.environmentId,
         userId: user._id,
         key: body.key,
         type: body.type,
         isSecret: body.isSecret,
         values: body.values,
+        restrictToUserEnvironment,
       })
     );
   }
@@ -187,23 +199,31 @@ export class EnvironmentVariablesController {
   @ApiOperation({
     summary: 'Update a variable',
     description:
-      'Updates an existing environment variable. Providing values replaces all existing per-environment values.',
+      'Updates an existing environment variable. Providing `values` merges them into the existing per-environment values by `_environmentId`; envs not present in the request keep their stored value. ' +
+      'Submitting the masked secret placeholder (the value returned by read endpoints for secret variables) as a real value is rejected.',
   })
   @ApiNotFoundResponse({ description: 'Environment variable not found.' })
+  @ApiResponse(ErrorDto, 400, false, false, {
+    description: 'A submitted value equals the public secret mask placeholder, or no fields were provided to update.',
+  })
   async updateEnvironmentVariable(
     @UserSession() user: UserSessionData,
     @Param('variableKey') variableKey: string,
     @Body() body: UpdateEnvironmentVariableRequestDto
   ): Promise<EnvironmentVariableResponseDto> {
+    const restrictToUserEnvironment = isEnvironmentScopedAuthScheme(user.scheme);
+
     return this.updateEnvironmentVariableUsecase.execute(
       UpdateEnvironmentVariableCommand.create({
         organizationId: user.organizationId,
+        environmentId: user.environmentId,
         userId: user._id,
         variableKey,
         key: body.key,
         type: body.type,
         isSecret: body.isSecret,
         values: body.values,
+        restrictToUserEnvironment,
       })
     );
   }
@@ -231,8 +251,10 @@ export class EnvironmentVariablesController {
     return this.deleteEnvironmentVariableUsecase.execute(
       DeleteEnvironmentVariableCommand.create({
         organizationId: user.organizationId,
+        environmentId: user.environmentId,
         userId: user._id,
         variableKey,
+        restrictToUserEnvironment: isEnvironmentScopedAuthScheme(user.scheme),
       })
     );
   }

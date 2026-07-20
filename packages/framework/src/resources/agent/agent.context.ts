@@ -1,6 +1,6 @@
 import type { Emoji } from 'chat';
-import { isJSX, toCardElement } from 'chat/jsx-runtime';
 import { AgentDeliveryError } from './agent.errors';
+import { type AgentRuntimeContext, RUNTIME_CONTEXT_BRAND } from './agent.runtime';
 import type {
   AddReactionPayload,
   AgentAction,
@@ -8,27 +8,37 @@ import type {
   AgentConversation,
   AgentHistoryEntry,
   AgentMessage,
+  AgentMessageContext,
   AgentPlatformContext,
   AgentReaction,
   AgentReplyPayload,
   AgentSubscriber,
+  AgentToolCall,
+  DeleteMessagePayload,
   FileRef,
   MessageContent,
+  PendingApproval as PendingApprovalType,
   ReplyContent,
   ReplyHandle,
   SentMessageInfo,
   Signal,
+  ToolApprovalCard,
+  ToolApprovalConfig,
+  ToolApprovalControl,
+  ToolResult,
   TriggerRecipientsPayload,
+  TypingControl,
+  TypingOp,
 } from './agent.types';
+import { AgentEventEnum, PendingApproval } from './agent.types';
+import { resolveCardContent } from './resolve-card-content';
+import type { ToolApprovalRequestPayload } from './tool-approval/action-id';
+import { postToolApprovalCard } from './tool-approval/post-card';
 
 const MAX_INLINE_FILE_BYTES = 5 * 1024 * 1024;
 const MAX_INLINE_AGGREGATE_FILE_BYTES = 5 * 1024 * 1024;
 const CHUNK_SIZE = 0x8000;
 const BASE64_REGEX = /^[A-Za-z0-9+/]*={0,2}$/;
-
-function isCardElement(content: object): content is import('chat').CardElement {
-  return 'type' in content && (content as { type: string }).type === 'card';
-}
 
 function describeFile(file: FileRef, index: number): string {
   return file.filename ? `"${file.filename}"` : `at index ${index}`;
@@ -189,15 +199,9 @@ async function serializeContent(content: MessageContent, files?: FileRef[]): Pro
     return validFiles ? { markdown: content, files: validFiles } : { markdown: content };
   }
 
-  if (isJSX(content)) {
-    const card = toCardElement(content);
-    if (card) {
-      return { card };
-    }
-  }
-
-  if (isCardElement(content)) {
-    return { card: content };
+  const card = await resolveCardContent(content);
+  if (card) {
+    return validFiles ? { card, files: validFiles } : { card };
   }
 
   throw new Error('Invalid message content — expected string or CardElement');
@@ -210,6 +214,8 @@ interface ReplyPoster {
 class ReplyHandleImpl implements ReplyHandle {
   public messageId: string;
   public platformThreadId: string;
+  /** @internal set when the handler calls `edit()`; dispatch skips default approval card cleanup. */
+  public editedByHandler = false;
 
   constructor(
     messageId: string,
@@ -223,6 +229,7 @@ class ReplyHandleImpl implements ReplyHandle {
   }
 
   async edit(content: MessageContent, options?: { files?: FileRef[] }): Promise<ReplyHandle> {
+    this.editedByHandler = true;
     const info = await this.poster.post({
       conversationId: this.conversationId,
       integrationIdentifier: this.integrationIdentifier,
@@ -244,10 +251,19 @@ class ReplyHandleImpl implements ReplyHandle {
 
     return this;
   }
+
+  async delete(): Promise<void> {
+    await this.poster.post({
+      conversationId: this.conversationId,
+      integrationIdentifier: this.integrationIdentifier,
+      deleteMessages: [{ messageId: this.messageId }],
+    });
+  }
 }
 
-export class AgentContextImpl {
-  readonly event: string;
+export class AgentContextImpl implements AgentRuntimeContext {
+  readonly [RUNTIME_CONTEXT_BRAND] = true;
+  readonly event: AgentEventEnum;
   readonly action: AgentAction | null;
   readonly message: AgentMessage | null;
   readonly reaction: AgentReaction | null;
@@ -256,6 +272,8 @@ export class AgentContextImpl {
   readonly history: AgentHistoryEntry[];
   readonly platform: string;
   readonly platformContext: AgentPlatformContext;
+  readonly typing: TypingControl;
+  readonly toolApproval: ToolApprovalControl;
 
   readonly metadata: {
     get(key: string): unknown;
@@ -266,17 +284,21 @@ export class AgentContextImpl {
   };
 
   private _signals: Signal[] = [];
+  private _toolResults: ToolResult[] = [];
+  private _pendingToolApprovalRequest: ToolApprovalRequestPayload | null = null;
   private _pendingReactions: AddReactionPayload[] = [];
+  private _pendingDeletes: DeleteMessagePayload[] = [];
   private _resolveSignal: { summary?: string } | null = null;
   private _metadataState: Record<string, unknown>;
+  private readonly _toolApprovalConfig?: ToolApprovalConfig;
   private readonly _replyUrl: string;
   private readonly _conversationId: string;
   private readonly _integrationIdentifier: string;
   private readonly _secretKey: string;
   private readonly _poster: ReplyPoster;
 
-  constructor(request: AgentBridgeRequest, secretKey: string) {
-    this.event = request.event;
+  constructor(request: AgentBridgeRequest, secretKey: string, toolApprovalConfig?: ToolApprovalConfig) {
+    this.event = request.event as AgentEventEnum;
     this.action = request.action ?? null;
     this.message = request.message;
     this.reaction = request.reaction;
@@ -291,6 +313,7 @@ export class AgentContextImpl {
     this._integrationIdentifier = request.integrationIdentifier;
     this._secretKey = secretKey;
     this._poster = { post: (body) => this._post(body) };
+    this._toolApprovalConfig = toolApprovalConfig;
 
     this._metadataState = { ...(request.conversation.metadata ?? {}) };
 
@@ -315,29 +338,41 @@ export class AgentContextImpl {
         return { ...self._metadataState } as Readonly<Record<string, unknown>>;
       },
     };
+
+    const postTyping = (op: TypingOp): Promise<void> =>
+      this._post({
+        conversationId: this._conversationId,
+        integrationIdentifier: this._integrationIdentifier,
+        typing: op,
+      }).then(() => undefined);
+
+    const typing = ((status?: string) => postTyping(status === undefined ? {} : { status })) as TypingControl;
+    typing.stop = () => postTyping('stop');
+    this.typing = typing;
+
+    this.toolApproval = {
+      request: async (toolCall: AgentToolCall): Promise<PendingApprovalType> => {
+        await postToolApprovalCard(this, toolCall, this._toolApprovalConfig);
+
+        return new PendingApproval();
+      },
+    };
+  }
+
+  asMessageContext(): AgentMessageContext {
+    return this as unknown as AgentMessageContext;
   }
 
   async reply(content: MessageContent, options?: { files?: FileRef[] }): Promise<ReplyHandle> {
+    const reply = await serializeContent(content, options?.files);
+
     const body: AgentReplyPayload = {
       conversationId: this._conversationId,
       integrationIdentifier: this._integrationIdentifier,
-      reply: await serializeContent(content, options?.files),
+      reply,
     };
 
-    if (this._signals.length) {
-      body.signals = this._signals;
-      this._signals = [];
-    }
-
-    if (this._pendingReactions.length) {
-      body.addReactions = this._pendingReactions;
-      this._pendingReactions = [];
-    }
-
-    if (this._resolveSignal) {
-      body.resolve = this._resolveSignal;
-      this._resolveSignal = null;
-    }
+    this._drainSideEffects(body);
 
     const info = await this._post(body);
     if (!info) {
@@ -353,6 +388,34 @@ export class AgentContextImpl {
     );
   }
 
+  async replyApprovalCard(card: ToolApprovalCard): Promise<ReplyHandle> {
+    const body: AgentReplyPayload = {
+      conversationId: this._conversationId,
+      integrationIdentifier: this._integrationIdentifier,
+      reply: { toolApprovalCard: card },
+    };
+
+    this._drainSideEffects(body);
+
+    const info = await this._post(body);
+    if (!info) {
+      throw new Error('Agent approval card reply did not return a message handle');
+    }
+
+    return new ReplyHandleImpl(
+      info.messageId,
+      info.platformThreadId,
+      this._conversationId,
+      this._integrationIdentifier,
+      this._poster
+    );
+  }
+
+  /** @internal Build a handle to an already-posted message (used to resume an approval). */
+  createReplyHandle(messageId: string): ReplyHandleImpl {
+    return new ReplyHandleImpl(messageId, '', this._conversationId, this._integrationIdentifier, this._poster);
+  }
+
   resolve(summary?: string): void {
     this._resolveSignal = { summary };
   }
@@ -361,8 +424,40 @@ export class AgentContextImpl {
     this._signals.push({ ...opts, type: 'trigger', workflowId });
   }
 
+  /** @internal Queue a gated tool call for the ledger; flushed with the next reply. */
+  emitToolApprovalRequest(request: ToolApprovalRequestPayload): void {
+    if (this._pendingToolApprovalRequest) {
+      throw new Error('Only one tool approval request can be queued before the next reply');
+    }
+
+    this._pendingToolApprovalRequest = request;
+  }
+
+  /** @internal Queue a tool-call outcome to be recorded in history; flushed with the next reply. */
+  emitToolResult(result: ToolResult): void {
+    this._toolResults.push(result);
+  }
+
   addReaction(messageId: string, emojiName: Emoji): void {
     this._pendingReactions.push({ messageId, emojiName });
+  }
+
+  deleteMessage(messageId: string): void {
+    this._pendingDeletes.push({ messageId });
+  }
+
+  /** Best-effort failure report to Novu. Never throws. */
+  async reportTurnError(): Promise<void> {
+    try {
+      await this._post({
+        conversationId: this._conversationId,
+        integrationIdentifier: this._integrationIdentifier,
+        error: true,
+      });
+    } catch (err) {
+      // Local only — cannot recurse into onError
+      console.error(`[agent] Failed to report turn error:`, err);
+    }
   }
 
   /**
@@ -370,7 +465,7 @@ export class AgentContextImpl {
    * Called internally after onResolve returns.
    */
   async flush(): Promise<void> {
-    if (!this._signals.length && !this._resolveSignal && !this._pendingReactions.length) {
+    if (!this._hasPendingSideEffects()) {
       return;
     }
 
@@ -379,9 +474,36 @@ export class AgentContextImpl {
       integrationIdentifier: this._integrationIdentifier,
     };
 
+    this._drainSideEffects(body);
+
+    await this._post(body);
+  }
+
+  private _hasPendingSideEffects(): boolean {
+    return !!(
+      this._pendingToolApprovalRequest ||
+      this._signals.length ||
+      this._toolResults.length ||
+      this._resolveSignal ||
+      this._pendingReactions.length ||
+      this._pendingDeletes.length
+    );
+  }
+
+  private _drainSideEffects(body: AgentReplyPayload): void {
+    if (this._pendingToolApprovalRequest) {
+      body.toolApprovalRequest = this._pendingToolApprovalRequest;
+      this._pendingToolApprovalRequest = null;
+    }
+
     if (this._signals.length) {
       body.signals = this._signals;
       this._signals = [];
+    }
+
+    if (this._toolResults.length) {
+      body.toolResults = this._toolResults;
+      this._toolResults = [];
     }
 
     if (this._pendingReactions.length) {
@@ -389,12 +511,15 @@ export class AgentContextImpl {
       this._pendingReactions = [];
     }
 
+    if (this._pendingDeletes.length) {
+      body.deleteMessages = this._pendingDeletes;
+      this._pendingDeletes = [];
+    }
+
     if (this._resolveSignal) {
       body.resolve = this._resolveSignal;
       this._resolveSignal = null;
     }
-
-    await this._post(body);
   }
 
   private async _post(body: AgentReplyPayload): Promise<SentMessageInfo | null> {

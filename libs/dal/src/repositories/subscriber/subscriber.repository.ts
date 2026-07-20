@@ -28,18 +28,81 @@ export class SubscriberRepository extends BaseRepository<SubscriberDBModel, Subs
     );
   }
 
+  async findByPhone(
+    environmentId: string,
+    organizationId: string,
+    phoneCandidates: string[],
+    digitFlexibleRegexSource?: string | null
+  ): Promise<SubscriberEntity[]> {
+    if (phoneCandidates.length === 0) {
+      return [];
+    }
+
+    // Exact `$in` covers canonical E.164 / Meta digit forms. Optional
+    // digit-flexible regex also matches stored phones with spaces, dashes, or
+    // parentheses (e.g. "+1 (555) 123-4567") so open-access WhatsApp does not
+    // miss a known subscriber or provision a duplicate phantom for the same number.
+    const phoneFilter = digitFlexibleRegexSource
+      ? {
+          $or: [{ phone: { $in: phoneCandidates } }, { phone: { $regex: digitFlexibleRegexSource } }],
+        }
+      : { phone: { $in: phoneCandidates } };
+
+    // Projects `_id` and `data` alongside `subscriberId` so the agent WhatsApp
+    // resolver can (a) map the external id to the Mongo `_id` needed to repoint
+    // MCP / tool-trust rows and (b) read the `__novu_source` provenance marker
+    // to tell an auto-provisioned "phantom" apart from a customer-created
+    // subscriber during the adoption merge. Limit raised from 2 to comfortably
+    // capture a real subscriber plus any phantom(s) sharing the phone.
+    return this.find(
+      {
+        _environmentId: environmentId,
+        _organizationId: organizationId,
+        ...phoneFilter,
+      },
+      '_id subscriberId phone data',
+      { limit: 10 }
+    );
+  }
+
+  async findByEmail(environmentId: string, organizationId: string, email: string): Promise<SubscriberEntity[]> {
+    if (!email) {
+      return [];
+    }
+
+    // Projects `_id` and `data` alongside `subscriberId` so the agent email
+    // resolver can (a) map the external id to the Mongo `_id` needed to repoint
+    // MCP / tool-trust rows and (b) read the `__novu_source` provenance marker
+    // to tell an auto-provisioned "phantom" apart from a customer-created
+    // subscriber during the adoption merge. Limit raised from 2 to comfortably
+    // capture a real subscriber plus any phantom(s) sharing the address.
+    return this.find(
+      {
+        _environmentId: environmentId,
+        _organizationId: organizationId,
+        email,
+      },
+      '_id subscriberId email data',
+      { limit: 10 }
+    );
+  }
+
   async bulkCreateSubscribers(
     subscribers: ISubscribersDefine[],
     environmentId: EnvironmentId,
     organizationId: OrganizationId
   ): Promise<BulkCreateSubscriberEntity> {
     const bulkWriteOps = subscribers.map((subscriber) => {
-      const { subscriberId, ...rest } = subscriber;
+      const updatableFields = pickUpdatableSubscriberFields(subscriber);
 
       return {
         updateOne: {
-          filter: { subscriberId, _environmentId: environmentId, _organizationId: organizationId },
-          update: { $set: { ...rest, deleted: false } },
+          filter: {
+            subscriberId: subscriber.subscriberId,
+            _environmentId: environmentId,
+            _organizationId: organizationId,
+          },
+          update: { $set: { ...updatableFields, deleted: false } },
           upsert: true,
         },
       };
@@ -152,6 +215,9 @@ export class SubscriberRepository extends BaseRepository<SubscriberDBModel, Subs
           subscriberId: { $eq: search },
         }
       );
+    }
+    if(filters.length === 0){
+      return [];
     }
 
     return (
@@ -277,6 +343,29 @@ export class SubscriberRepository extends BaseRepository<SubscriberDBModel, Subs
 
 function mapToSubscriberObject(subscriberId: string) {
   return { subscriberId };
+}
+
+const UPDATABLE_SUBSCRIBER_FIELDS: readonly (keyof ISubscribersDefine)[] = [
+  'firstName',
+  'lastName',
+  'email',
+  'phone',
+  'avatar',
+  'locale',
+  'data',
+  'channels',
+  'timezone',
+];
+
+function pickUpdatableSubscriberFields(subscriber: ISubscribersDefine): Partial<ISubscribersDefine> {
+  const result: Partial<ISubscribersDefine> = {};
+  for (const field of UPDATABLE_SUBSCRIBER_FIELDS) {
+    if (field in subscriber) {
+      (result as Record<string, unknown>)[field] = subscriber[field];
+    }
+  }
+
+  return result;
 }
 
 function regExpEscape(literalString: string): string {

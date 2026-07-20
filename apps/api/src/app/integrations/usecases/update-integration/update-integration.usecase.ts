@@ -1,9 +1,14 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { AnalyticsService, encryptCredentials, PinoLogger } from '@novu/application-generic';
-import { IntegrationEntity, IntegrationRepository } from '@novu/dal';
+import { AnalyticsService, decryptCredentials, encryptCredentials, PinoLogger } from '@novu/application-generic';
+import { EnvironmentRepository, IntegrationEntity, IntegrationRepository } from '@novu/dal';
 import { CHANNELS_WITH_PRIMARY } from '@novu/shared';
+import { assertIntegrationEnvironmentScope } from '../../utils/assert-integration-environment-scope';
+import { validateOutboundIntegrationCredentials } from '../../utils/validate-outbound-integration-credentials';
 import { CheckIntegrationCommand } from '../check-integration/check-integration.command';
 import { CheckIntegration } from '../check-integration/check-integration.usecase';
+import { ensureNovuAgentManagedCredentials } from '../novu-agent/novu-agent-credentials.utils';
+import { ensureWhatsAppManagedCredentials } from '../whatsapp/whatsapp-credentials.utils';
+import { maybeStampWhatsNextCompletedAt } from '../whatsapp/whatsapp-whats-next-stamp.utils';
 import { UpdateIntegrationCommand } from './update-integration.command';
 
 @Injectable()
@@ -13,6 +18,7 @@ export class UpdateIntegration {
   constructor(
     private integrationRepository: IntegrationRepository,
     private analyticsService: AnalyticsService,
+    private environmentRepository: EnvironmentRepository,
     private logger: PinoLogger
   ) {
     this.logger.setContext(this.constructor.name);
@@ -100,6 +106,23 @@ export class UpdateIntegration {
       throw new NotFoundException(`Entity with id ${command.integrationId} not found`);
     }
 
+    assertIntegrationEnvironmentScope({
+      restrictToUserEnvironment: command.restrictToUserEnvironment,
+      userEnvironmentId: command.userEnvironmentId,
+      integrationEnvironmentId: existingIntegration._environmentId,
+      action: 'update',
+    });
+
+    if (command.environmentId && command.environmentId !== existingIntegration._environmentId) {
+      const targetEnvironment = await this.environmentRepository.findByIdAndOrganization(
+        command.environmentId,
+        command.organizationId
+      );
+      if (!targetEnvironment) {
+        throw new NotFoundException(`Environment with id ${command.environmentId} not found`);
+      }
+    }
+
     const identifierHasChanged = command.identifier && command.identifier !== existingIntegration.identifier;
     if (identifierHasChanged) {
       const existingIntegrationWithIdentifier = await this.integrationRepository.findOne({
@@ -120,13 +143,18 @@ export class UpdateIntegration {
     });
 
     const environmentId = command.environmentId ?? existingIntegration._environmentId;
+    const credentialsForValidation = command.credentials ?? existingIntegration.credentials ?? {};
+
+    if (command.check || command.credentials) {
+      await validateOutboundIntegrationCredentials(existingIntegration.providerId, credentialsForValidation);
+    }
 
     if (command.check) {
       await this.checkIntegration.execute(
         CheckIntegrationCommand.create({
           environmentId,
           organizationId: command.organizationId,
-          credentials: command.credentials ?? existingIntegration.credentials ?? {},
+          credentials: credentialsForValidation,
           providerId: existingIntegration.providerId,
           channel: existingIntegration.channel,
         })
@@ -154,7 +182,26 @@ export class UpdateIntegration {
     }
 
     if (command.credentials) {
-      updatePayload.credentials = encryptCredentials(command.credentials);
+      const existingCredentials = existingIntegration.credentials
+        ? decryptCredentials(existingIntegration.credentials)
+        : undefined;
+      const whatsAppMerged = ensureWhatsAppManagedCredentials({
+        providerId: existingIntegration.providerId,
+        nextCredentials: command.credentials,
+        existingCredentials,
+        allowManagedFlagChange: command.allowNovuManagedWhatsAppCredentials === true,
+      });
+      const managedCredentials = ensureNovuAgentManagedCredentials({
+        providerId: existingIntegration.providerId,
+        nextCredentials: whatsAppMerged,
+        existingCredentials,
+      });
+      const stampedCredentials = maybeStampWhatsNextCompletedAt({
+        providerId: existingIntegration.providerId,
+        existingCredentials,
+        nextCredentials: managedCredentials,
+      });
+      updatePayload.credentials = encryptCredentials(stampedCredentials);
     }
 
     if (command.configurations) {
@@ -171,7 +218,8 @@ export class UpdateIntegration {
 
     const haveConditions = updatePayload.conditions && updatePayload.conditions?.length > 0;
 
-    const isChannelSupportsPrimary = CHANNELS_WITH_PRIMARY.includes(existingIntegration.channel);
+    const isChannelSupportsPrimary =
+      !!existingIntegration.channel && CHANNELS_WITH_PRIMARY.includes(existingIntegration.channel);
     if (isActiveChanged && isChannelSupportsPrimary) {
       const { primary, priority } = await this.calculatePriorityAndPrimary({
         existingIntegration,
@@ -190,6 +238,7 @@ export class UpdateIntegration {
     await this.integrationRepository.update(
       {
         _id: existingIntegration._id,
+        _organizationId: existingIntegration._organizationId,
         _environmentId: existingIntegration._environmentId,
       },
       {
@@ -201,13 +250,14 @@ export class UpdateIntegration {
       await this.integrationRepository.recalculatePriorityForAllActive({
         _id: existingIntegration._id,
         _organizationId: existingIntegration._organizationId,
-        _environmentId: existingIntegration._organizationId,
+        _environmentId: existingIntegration._environmentId,
         channel: existingIntegration.channel,
       });
     }
 
     const updatedIntegration = await this.integrationRepository.findOne({
       _id: command.integrationId,
+      _organizationId: existingIntegration._organizationId,
       _environmentId: environmentId,
     });
     if (!updatedIntegration) {

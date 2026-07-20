@@ -1,15 +1,17 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 import { encryptSecret, ResourceValidatorService } from '@novu/application-generic';
-import { EnvironmentVariableRepository, ErrorCodesEnum } from '@novu/dal';
-import { EnvironmentVariableType } from '@novu/shared';
+import { EnvironmentRepository, EnvironmentVariableRepository, ErrorCodesEnum } from '@novu/dal';
+import { EnvironmentVariableType, SECRET_MASK } from '@novu/shared';
 import { EnvironmentVariableResponseDto } from '../../dtos/environment-variable-response.dto';
 import { toEnvironmentVariableResponseDto } from '../get-environment-variables/get-environment-variables.usecase';
+import { validateEnvironmentVariableValues } from '../validate-environment-variable-values';
 import { CreateEnvironmentVariableCommand } from './create-environment-variable.command';
 
 @Injectable()
 export class CreateEnvironmentVariable {
   constructor(
     private environmentVariableRepository: EnvironmentVariableRepository,
+    private environmentRepository: EnvironmentRepository,
     private resourceValidatorService: ResourceValidatorService
   ) {}
 
@@ -25,7 +27,21 @@ export class CreateEnvironmentVariable {
       throw new ConflictException(`Environment variable with key "${command.key}" already exists`);
     }
 
-    const values = (command.values ?? []).map((v) => ({
+    const incomingValues = command.values ?? [];
+
+    await validateEnvironmentVariableValues(this.environmentRepository, command.organizationId, incomingValues, {
+      restrictToUserEnvironment: command.restrictToUserEnvironment,
+      userEnvironmentId: command.environmentId,
+    });
+
+    const maskedValue = incomingValues.find((v) => v.value === SECRET_MASK);
+    if (maskedValue) {
+      throw new BadRequestException(
+        'Submitted value matches the secret mask placeholder; provide the real value or omit the entry.'
+      );
+    }
+
+    const values = incomingValues.map((v) => ({
       _environmentId: v._environmentId,
       value: encryptSecret(v.value),
     }));

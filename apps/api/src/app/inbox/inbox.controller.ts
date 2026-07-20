@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -14,16 +15,14 @@ import {
   Req,
   UseGuards,
   UseInterceptors,
+  ValidationPipe,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { ApiExcludeController } from '@nestjs/swagger';
-import {
-  AddressingTypeEnum,
-  MessageActionStatusEnum,
-  PreferenceLevelEnum,
-  TriggerRequestCategoryEnum,
-  UserSessionData,
-} from '@novu/shared';
+import { IntegrationRepository } from '@novu/dal';
+import { ChatProviderIdEnum, MessageActionStatusEnum, PreferenceLevelEnum, UserSessionData } from '@novu/shared';
+import type { Request } from 'express';
+import { getClientIp } from 'request-ip';
 import { ListChannelConnectionsQueryDto } from '../channel-connections/dtos/list-channel-connections-query.dto';
 import { DeleteChannelConnectionCommand } from '../channel-connections/usecases/delete-channel-connection/delete-channel-connection.command';
 import { DeleteChannelConnection } from '../channel-connections/usecases/delete-channel-connection/delete-channel-connection.usecase';
@@ -38,13 +37,11 @@ import { GetChannelEndpointCommand } from '../channel-endpoints/usecases/get-cha
 import { GetChannelEndpoint } from '../channel-endpoints/usecases/get-channel-endpoint/get-channel-endpoint.usecase';
 import { ListChannelEndpointsCommand } from '../channel-endpoints/usecases/list-channel-endpoints/list-channel-endpoints.command';
 import { ListChannelEndpoints } from '../channel-endpoints/usecases/list-channel-endpoints/list-channel-endpoints.usecase';
-import { TriggerEventRequestDto } from '../events/dtos';
 import { TriggerEventResponseDto } from '../events/dtos/trigger-event-response.dto';
-import { ParseEventRequestMulticastCommand } from '../events/usecases/parse-event-request';
-import { ParseEventRequest } from '../events/usecases/parse-event-request/parse-event-request.usecase';
 import { GenerateChatOAuthUrlResponseDto } from '../integrations/dtos/generate-chat-oauth-url-response.dto';
 import { GenerateConnectOauthUrlRequestDto } from '../integrations/dtos/generate-connect-oauth-url-request.dto';
 import { GenerateLinkUserOauthUrlRequestDto } from '../integrations/dtos/generate-link-user-oauth-url-request.dto';
+import { LinkChannelEndpointResponseDto } from '../integrations/dtos/link-channel-endpoint-response.dto';
 import { GenerateConnectOauthUrlCommand } from '../integrations/usecases/generate-chat-oath-url/generate-connect-oauth-url.command';
 import { GenerateConnectOauthUrl } from '../integrations/usecases/generate-chat-oath-url/generate-connect-oauth-url.usecase';
 import { GenerateLinkUserOauthUrlCommand } from '../integrations/usecases/generate-chat-oath-url/generate-link-user-oauth-url.command';
@@ -52,12 +49,14 @@ import { GenerateLinkUserOauthUrl } from '../integrations/usecases/generate-chat
 import { ExcludeFromIdempotency } from '../shared/framework/exclude-from-idempotency';
 import { ApiCommonResponses } from '../shared/framework/response.decorator';
 import { KeylessAccessible } from '../shared/framework/swagger/keyless.security';
-import { SubscriberSession, UserSession } from '../shared/framework/user.decorator';
+import { SubscriberSession } from '../shared/framework/user.decorator';
 import { RequestWithReqId } from '../shared/middleware/request-id.middleware';
 import {
   GetSubscriberGlobalPreference,
   GetSubscriberGlobalPreferenceCommand,
 } from '../subscribers/usecases/get-subscriber-global-preference';
+import { IssueTelegramSubscriberLinkCommand } from '../telegram-linking/issue-telegram-subscriber-link/issue-telegram-subscriber-link.command';
+import { IssueTelegramSubscriberLink } from '../telegram-linking/issue-telegram-subscriber-link/issue-telegram-subscriber-link.usecase';
 import { ActionTypeRequestDto } from './dtos/action-type-request.dto';
 import { BulkUpdatePreferencesRequestDto } from './dtos/bulk-update-preferences-request.dto';
 import { GetNotificationsCountRequestDto } from './dtos/get-notifications-count-request.dto';
@@ -73,6 +72,8 @@ import {
 import { InboxListChannelEndpointsResponseDto } from './dtos/inbox-channel-endpoint-response.dto';
 import { mapChannelConnectionToInboxDto, mapChannelEndpointToInboxDto } from './dtos/inbox-dto.mapper';
 import { InboxNotificationDto } from './dtos/inbox-notification.dto';
+import { InboxTriggerEventRequestDto } from './dtos/inbox-trigger-event-request.dto';
+import { InboxLinkChannelEndpointRequestDto } from './dtos/link-channel-endpoint-request.dto';
 import { MarkNotificationsAsSeenRequestDto } from './dtos/mark-notifications-as-seen-request.dto';
 import { SnoozeNotificationRequestDto } from './dtos/snooze-notification-request.dto';
 import { SubscriberSessionRequestDto } from './dtos/subscriber-session-request.dto';
@@ -100,6 +101,8 @@ import { SessionCommand } from './usecases/session/session.command';
 import { Session } from './usecases/session/session.usecase';
 import { SnoozeNotificationCommand } from './usecases/snooze-notification/snooze-notification.command';
 import { SnoozeNotification } from './usecases/snooze-notification/snooze-notification.usecase';
+import { TriggerKeylessEventCommand } from './usecases/trigger-keyless-event/trigger-keyless-event.command';
+import { TriggerKeylessEvent } from './usecases/trigger-keyless-event/trigger-keyless-event.usecase';
 import { UnsnoozeNotificationCommand } from './usecases/unsnooze-notification/unsnooze-notification.command';
 import { UnsnoozeNotification } from './usecases/unsnooze-notification/unsnooze-notification.usecase';
 import { UpdateAllNotificationsCommand } from './usecases/update-all-notifications/update-all-notifications.command';
@@ -128,7 +131,7 @@ export class InboxController {
     private snoozeNotificationUsecase: SnoozeNotification,
     private unsnoozeNotificationUsecase: UnsnoozeNotification,
     private markNotificationsAsSeenUsecase: MarkNotificationsAsSeen,
-    private parseEventRequest: ParseEventRequest,
+    private triggerKeylessEventUsecase: TriggerKeylessEvent,
     private getSubscriberGlobalPreference: GetSubscriberGlobalPreference,
     private deleteNotificationUsecase: DeleteNotification,
     private deleteAllNotificationsUsecase: DeleteAllNotifications,
@@ -139,19 +142,23 @@ export class InboxController {
     private getChannelEndpointUsecase: GetChannelEndpoint,
     private deleteChannelEndpointUsecase: DeleteChannelEndpoint,
     private generateConnectOauthUrlUsecase: GenerateConnectOauthUrl,
-    private generateLinkUserOauthUrlUsecase: GenerateLinkUserOauthUrl
+    private generateLinkUserOauthUrlUsecase: GenerateLinkUserOauthUrl,
+    private issueTelegramSubscriberLinkUsecase: IssueTelegramSubscriberLink,
+    private integrationRepository: IntegrationRepository
   ) {}
 
   @KeylessAccessible()
   @Post('/session')
   async sessionInitialize(
     @Body() body: SubscriberSessionRequestDto,
-    @Headers('origin') origin: string
+    @Headers('origin') origin: string,
+    @Req() request: Request
   ): Promise<SubscriberSessionResponseDto> {
     return await this.initializeSessionUsecase.execute(
       SessionCommand.create({
         requestData: body,
         origin,
+        clientIp: getClientIp(request) ?? undefined,
       })
     );
   }
@@ -630,36 +637,43 @@ export class InboxController {
     );
   }
 
+  /**
+   * Triggers the keyless / demo "hello-world" workflow for the authenticated
+   * subscriber. The endpoint is intentionally restricted: an inbox subscriber
+   * JWT can only fire the keyless demo workflow, only target itself as the
+   * recipient, and only when the caller belongs to a keyless environment. Any
+   * attempt to trigger a different workflow id, target another recipient, or
+   * call from a non-keyless environment is rejected to prevent privilege
+   * escalation. The actual validation lives in `TriggerKeylessEvent`.
+   *
+   * Uses `InboxTriggerEventRequestDto` (a minimal, inbox-only DTO) instead of
+   * the full `TriggerEventRequestDto` so subscriber-controlled fields such as
+   * `bridgeUrl`, `controls`, `overrides`, `actor`, `tenant`, `transactionId`
+   * and `context` cannot reach this route. The per-route `ValidationPipe` with
+   * `whitelist: true` actively strips any extra fields before the handler runs
+   * so a subscriber JWT can never drive signed outbound bridge requests.
+   */
   @KeylessAccessible()
   @UseGuards(AuthGuard('subscriberJwt'))
   @Post('/events')
   async keylessEvents(
-    @UserSession() user: UserSessionData,
-    @Body() body: TriggerEventRequestDto,
+    @SubscriberSession() subscriberSession: SubscriberSession,
+    @Body(new ValidationPipe({ transform: true, whitelist: true, forbidUnknownValues: false }))
+    body: InboxTriggerEventRequestDto,
     @Req() req: RequestWithReqId
   ): Promise<TriggerEventResponseDto> {
-    const result = await this.parseEventRequest.execute(
-      ParseEventRequestMulticastCommand.create({
-        userId: user._id,
-        environmentId: user.environmentId,
-        organizationId: user.organizationId,
-        identifier: body.name,
-        payload: body.payload || {},
-        overrides: body.overrides || {},
-        to: body.to,
-        actor: body.actor,
-        tenant: body.tenant,
-        context: body.context,
-        transactionId: body.transactionId,
-        addressingType: AddressingTypeEnum.MULTICAST,
-        requestCategory: TriggerRequestCategoryEnum.SINGLE,
-        bridgeUrl: body.bridgeUrl,
-        controls: body.controls,
+    return this.triggerKeylessEventUsecase.execute(
+      TriggerKeylessEventCommand.create({
+        environmentId: subscriberSession._environmentId,
+        organizationId: subscriberSession._organizationId,
+        subscriberId: subscriberSession.subscriberId,
+        contextKeys: subscriberSession.contextKeys,
+        workflowIdentifier: body.name,
+        recipient: body.to,
+        payload: body.payload,
         requestId: req._nvRequestId,
       })
     );
-
-    return result as unknown as TriggerEventResponseDto;
   }
 
   @UseGuards(AuthGuard('subscriberJwt'))
@@ -681,7 +695,7 @@ export class InboxController {
         orderDirection: query.orderDirection,
         orderBy: query.orderBy || 'createdAt',
         includeCursor: query.includeCursor,
-        contextKeys: query.contextKeys,
+        contextKeys: subscriberSession.contextKeys,
         channel: query.channel,
         providerId: query.providerId,
         integrationIdentifier: query.integrationIdentifier,
@@ -701,17 +715,7 @@ export class InboxController {
     @SubscriberSession() subscriberSession: SubscriberSession,
     @Param('identifier') identifier: string
   ): Promise<InboxChannelConnectionResponseDto> {
-    const channelConnection = await this.getChannelConnectionUsecase.execute(
-      GetChannelConnectionCommand.create({
-        environmentId: subscriberSession._environmentId,
-        organizationId: subscriberSession._organizationId,
-        identifier,
-      })
-    );
-
-    if (channelConnection.subscriberId && channelConnection.subscriberId !== subscriberSession.subscriberId) {
-      throw new NotFoundException(`Channel connection not found: ${identifier}`);
-    }
+    const channelConnection = await this.loadChannelConnectionForSubscriber(subscriberSession, identifier);
 
     return mapChannelConnectionToInboxDto(channelConnection);
   }
@@ -723,17 +727,7 @@ export class InboxController {
     @SubscriberSession() subscriberSession: SubscriberSession,
     @Param('identifier') identifier: string
   ): Promise<void> {
-    const channelConnection = await this.getChannelConnectionUsecase.execute(
-      GetChannelConnectionCommand.create({
-        environmentId: subscriberSession._environmentId,
-        organizationId: subscriberSession._organizationId,
-        identifier,
-      })
-    );
-
-    if (channelConnection.subscriberId && channelConnection.subscriberId !== subscriberSession.subscriberId) {
-      throw new NotFoundException(`Channel connection not found: ${identifier}`);
-    }
+    await this.loadChannelConnectionForSubscriber(subscriberSession, identifier);
 
     await this.deleteChannelConnectionUsecase.execute(
       DeleteChannelConnectionCommand.create({
@@ -742,6 +736,25 @@ export class InboxController {
         identifier,
       })
     );
+  }
+
+  private async loadChannelConnectionForSubscriber(subscriberSession: SubscriberSession, identifier: string) {
+    try {
+      return await this.getChannelConnectionUsecase.execute(
+        GetChannelConnectionCommand.create({
+          environmentId: subscriberSession._environmentId,
+          organizationId: subscriberSession._organizationId,
+          identifier,
+          subscriberId: subscriberSession.subscriberId,
+          contextKeys: subscriberSession.contextKeys,
+        })
+      );
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw new NotFoundException(`Channel connection not found: ${identifier}`);
+      }
+      throw error;
+    }
   }
 
   @UseGuards(AuthGuard('subscriberJwt'))
@@ -763,7 +776,7 @@ export class InboxController {
         orderDirection: query.orderDirection,
         orderBy: query.orderBy || 'createdAt',
         includeCursor: query.includeCursor,
-        contextKeys: query.contextKeys,
+        contextKeys: subscriberSession.contextKeys,
         channel: query.channel,
         providerId: query.providerId,
         integrationIdentifier: query.integrationIdentifier,
@@ -785,16 +798,21 @@ export class InboxController {
     @SubscriberSession() subscriberSession: SubscriberSession,
     @Param('identifier') identifier: string
   ): Promise<void> {
-    const channelEndpoint = await this.getChannelEndpointUsecase.execute(
-      GetChannelEndpointCommand.create({
-        environmentId: subscriberSession._environmentId,
-        organizationId: subscriberSession._organizationId,
-        identifier,
-      })
-    );
-
-    if (channelEndpoint.subscriberId && channelEndpoint.subscriberId !== subscriberSession.subscriberId) {
-      throw new NotFoundException(`Channel endpoint not found: ${identifier}`);
+    try {
+      await this.getChannelEndpointUsecase.execute(
+        GetChannelEndpointCommand.create({
+          environmentId: subscriberSession._environmentId,
+          organizationId: subscriberSession._organizationId,
+          identifier,
+          subscriberId: subscriberSession.subscriberId,
+          contextKeys: subscriberSession.contextKeys,
+        })
+      );
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw new NotFoundException(`Channel endpoint not found: ${identifier}`);
+      }
+      throw error;
     }
 
     await this.deleteChannelEndpointUsecase.execute(
@@ -848,5 +866,59 @@ export class InboxController {
     );
 
     return { url };
+  }
+
+  /**
+   * Subscriber-JWT twin of `POST /v1/integrations/channel-endpoints/link`.
+   * Returns a provider-specific URL the subscriber opens to link their chat
+   * identity. The subscriber is resolved from the session token, so the body
+   * only carries `integrationIdentifier`. Telegram returns a `t.me` deep link.
+   */
+  @UseGuards(AuthGuard('subscriberJwt'))
+  @Post('/channel-endpoints/link')
+  @HttpCode(HttpStatus.OK)
+  async linkChannelEndpoint(
+    @SubscriberSession() subscriberSession: SubscriberSession,
+    @Body() body: InboxLinkChannelEndpointRequestDto
+  ): Promise<LinkChannelEndpointResponseDto> {
+    const integration = await this.integrationRepository.findOne(
+      {
+        identifier: body.integrationIdentifier,
+        _environmentId: subscriberSession._environmentId,
+        _organizationId: subscriberSession._organizationId,
+      },
+      '_id providerId'
+    );
+
+    if (!integration) {
+      throw new NotFoundException(`Integration ${body.integrationIdentifier} not found`);
+    }
+
+    const providerId = integration.providerId as ChatProviderIdEnum;
+
+    switch (providerId) {
+      case ChatProviderIdEnum.Telegram: {
+        const result = await this.issueTelegramSubscriberLinkUsecase.execute(
+          IssueTelegramSubscriberLinkCommand.create({
+            environmentId: subscriberSession._environmentId,
+            organizationId: subscriberSession._organizationId,
+            integrationIdentifier: body.integrationIdentifier,
+            subscriberId: subscriberSession.subscriberId,
+          })
+        );
+
+        return {
+          url: result.deepLinkUrl,
+          providerMetadata: {
+            botUsername: result.botUsername,
+            expiresAt: result.expiresAt,
+          },
+        };
+      }
+      default:
+        throw new BadRequestException(
+          `Provider "${providerId}" does not support subscriber chat linking via this endpoint.`
+        );
+    }
   }
 }

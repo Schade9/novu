@@ -23,8 +23,12 @@ import { EnvironmentDropdown } from '../../side-navigation/environment-dropdown'
 import { CredentialSection } from './credential-section';
 import { GeneralSettings } from './integration-general-settings';
 import { SlackCredentialsPaste } from './slack-credentials-paste';
+import { TelegramCredentialsPaste, type TelegramCredentialsPasteMobileSetup } from './telegram-credentials-paste';
 import { useSlackCredentialsPasteFallback } from './use-slack-credentials-paste-fallback';
+import { useWhatsAppCredentialsPasteFallback } from './use-whatsapp-credentials-paste-fallback';
 import { isDemoIntegration } from './utils/helpers';
+import { WhatsAppCredentialsPaste } from './whatsapp-credentials-paste';
+import { WhatsAppCredentialsValidator } from './whatsapp-credentials-validator';
 
 type IntegrationFormData = {
   name: string;
@@ -46,6 +50,10 @@ type IntegrationConfigurationProps = {
   hasOtherProviders?: boolean;
   isReadOnly?: boolean;
   agentOnboarding?: boolean;
+  /** Agent identifier — only set during the agent-onboarding flow. */
+  agentIdentifier?: string;
+  /** Quickstart test subscriber for Telegram mobile `/start` deep links. */
+  testSubscriberId?: string | null;
   onFormStateChange?: (formState: { isValid: boolean; errors: Record<string, unknown>; isDirty: boolean }) => void;
 };
 
@@ -67,6 +75,8 @@ export function IntegrationSettings({
   hasOtherProviders,
   isReadOnly,
   agentOnboarding,
+  agentIdentifier,
+  testSubscriberId,
   onFormStateChange,
 }: IntegrationConfigurationProps) {
   const navigate = useNavigate();
@@ -122,11 +132,43 @@ export function IntegrationSettings({
   const isDemo = integration && isDemoIntegration(integration.providerId);
   const isAgentOnboarding = agentOnboarding || searchParams.get('agent_onboarding') === 'true';
   const isSlackOnboarding = isAgentOnboarding && provider.id === ChatProviderIdEnum.Slack;
+  const isWhatsAppOnboarding = isAgentOnboarding && provider.id === ChatProviderIdEnum.WhatsAppBusiness;
+  const isTelegramProvider = provider.id === ChatProviderIdEnum.Telegram;
+  // The BotFather paste helper is an onboarding affordance — once the integration
+  // already has a saved bot token, the textarea and mobile QR card are noise
+  // (and the "Auto-filled from the BotFather message above…" hint becomes
+  // misleading), so hide all of it and fall back to the regular API token field.
+  const telegramApiToken = integration?.credentials?.[CredentialsKeyEnum.ApiToken];
+  const hasExistingTelegramToken =
+    isTelegramProvider && typeof telegramApiToken === 'string' && telegramApiToken.trim().length > 0;
+  const showTelegramPaste = isTelegramProvider && !isReadOnly && !hasExistingTelegramToken;
+  // Picks the QR variant: agent flow when we already have agent + integration,
+  // integration-store flow in the create flow where neither exists yet, none
+  // otherwise (e.g. plain edit of a non-agent Telegram integration).
+  const telegramMobileVariant = useMemo<TelegramCredentialsPasteMobileSetup | undefined>(() => {
+    if (!showTelegramPaste) return undefined;
+
+    if (isAgentOnboarding && integration?.identifier) {
+      return { kind: 'agent', integrationIdentifier: integration.identifier, testSubscriberId };
+    }
+
+    if (mode === 'create') return { kind: 'integration-store' };
+
+    return undefined;
+  }, [showTelegramPaste, isAgentOnboarding, integration?.identifier, mode, testSubscriberId]);
   const handleSlackCredentialsPaste = useSlackCredentialsPasteFallback({
     control,
     setValue,
     isEnabled: isSlackOnboarding && !isReadOnly,
   });
+  const handleWhatsAppCredentialsPaste = useWhatsAppCredentialsPasteFallback({
+    control,
+    setValue,
+    isEnabled: isWhatsAppOnboarding && !isReadOnly,
+  });
+  const handleAgentOnboardingPaste = isWhatsAppOnboarding
+    ? handleWhatsAppCredentialsPaste
+    : handleSlackCredentialsPaste;
 
   const providerCredentials = useMemo(() => {
     let credentials = provider.credentials;
@@ -141,11 +183,13 @@ export function IntegrationSettings({
       }
     }
 
+    const visibleCredentials = credentials.filter((credential) => credential.hidden !== true);
+
     if (isAgentOnboarding) {
-      return credentials.filter((credential) => credential.key !== CredentialsKeyEnum.RedirectUrl);
+      return visibleCredentials.filter((credential) => credential.key !== CredentialsKeyEnum.RedirectUrl);
     }
 
-    return credentials;
+    return visibleCredentials;
   }, [provider.id, provider.credentials, mode, integration?.credentials, isAgentOnboarding]);
 
   return (
@@ -225,6 +269,34 @@ export function IntegrationSettings({
           </div>
         )}
 
+        {!isDemo &&
+          !isAgentOnboarding &&
+          ((integration && integration.channel === ChannelTypeEnum.IN_APP && !integration.connected) ||
+            provider?.docReference) && (
+            <div className="p-3">
+              {integration && integration.channel === ChannelTypeEnum.IN_APP && !integration.connected ? (
+                <InlineToast
+                  variant={'tip'}
+                  title="Integrate in less than 4 minutes"
+                  ctaLabel="Get started"
+                  onCtaClick={() => navigate(`${ROUTES.INBOX_EMBED}?environmentId=${integration._environmentId}`)}
+                />
+              ) : (
+                provider?.docReference && (
+                  <InlineToast
+                    variant={'tip'}
+                    title="Configure Integration"
+                    description="To learn more about how to configure your integration, please refer to the documentation."
+                    ctaLabel="View Guide"
+                    onCtaClick={() => {
+                      window.open(provider.docReference ?? '', '_blank');
+                    }}
+                  />
+                )
+              )}
+            </div>
+          )}
+
         {!isDemo && providerCredentials.length > 0 && (
           <div className="p-3">
             <Protect permission={PermissionsEnum.INTEGRATION_WRITE}>
@@ -248,11 +320,32 @@ export function IntegrationSettings({
                       {isSlackOnboarding && (
                         <SlackCredentialsPaste control={control} setValue={setValue} isReadOnly={isReadOnly} />
                       )}
-                      <div onPasteCapture={handleSlackCredentialsPaste} className="flex flex-col gap-2">
+                      {isWhatsAppOnboarding && (
+                        <>
+                          <WhatsAppCredentialsPaste control={control} setValue={setValue} isReadOnly={isReadOnly} />
+                          <WhatsAppCredentialsValidator control={control} />
+                        </>
+                      )}
+                      {showTelegramPaste && (
+                        <TelegramCredentialsPaste
+                          control={control}
+                          setValue={setValue}
+                          isReadOnly={isReadOnly}
+                          mobileSetup={telegramMobileVariant}
+                        />
+                      )}
+                      <div onPasteCapture={handleAgentOnboardingPaste} className="flex flex-col gap-2">
                         {providerCredentials.map((credential) => (
                           <CredentialSection
                             key={`${credential.key}-${integration?._id || 'no-id'}`}
-                            credential={credential}
+                            credential={
+                              showTelegramPaste && credential.key === CredentialsKeyEnum.ApiToken
+                                ? {
+                                    ...credential,
+                                    description: 'Auto-filled from the BotFather message above, or enter it manually.',
+                                  }
+                                : credential
+                            }
                             control={control}
                             isReadOnly={isReadOnly}
                             integrationId={integration?._id}
@@ -264,35 +357,6 @@ export function IntegrationSettings({
                 </AccordionItem>
               </Accordion>
             </Protect>
-
-            {/* TODO: This is a temporary solution to show the guide only for in-app channel, 
-              we need to replace it with dedicated view per integration channel */}
-            {!isAgentOnboarding &&
-            integration &&
-            integration.channel === ChannelTypeEnum.IN_APP &&
-            !integration.connected ? (
-              <InlineToast
-                variant={'tip'}
-                className="mt-3"
-                title="Integrate in less than 4 minutes"
-                ctaLabel="Get started"
-                onCtaClick={() => navigate(`${ROUTES.INBOX_EMBED}?environmentId=${integration._environmentId}`)}
-              />
-            ) : (
-              !isAgentOnboarding &&
-              provider?.docReference && (
-                <InlineToast
-                  variant={'tip'}
-                  className="mt-3"
-                  title="Configure Integration"
-                  description="To learn more about how to configure your integration, please refer to the documentation."
-                  ctaLabel="View Guide"
-                  onCtaClick={() => {
-                    window.open(provider?.docReference ?? '', '_blank');
-                  }}
-                />
-              )
-            )}
           </div>
         )}
       </FormRoot>

@@ -1,4 +1,4 @@
-import { useUser } from '@clerk/clerk-react';
+import { useUser } from '@clerk/react';
 import { Bell, Inbox, InboxContent, useNovu } from '@novu/react';
 import { useEffect, useMemo, useState } from 'react';
 import { Popover, PopoverContent, PopoverPortal, PopoverTrigger } from '@/components/primitives/popover';
@@ -20,7 +20,13 @@ declare global {
   }
 }
 
-const InboxInner = () => {
+const InboxInner = ({
+  align = 'end',
+  side = 'bottom',
+}: {
+  align?: 'start' | 'center' | 'end';
+  side?: 'top' | 'bottom' | 'left' | 'right';
+}) => {
   const [open, setOpen] = useState(false);
   const [jingle, setJingle] = useState(false);
   const { isWorkflowEditorPage } = useWorkflowEditorPage();
@@ -77,7 +83,7 @@ const InboxInner = () => {
         />
       </PopoverTrigger>
       <PopoverPortal>
-        <PopoverContent side="bottom" align="end" className="h-[550px] w-[350px] overflow-hidden p-0">
+        <PopoverContent side={side} align={align} className="h-[550px] w-[350px] overflow-hidden p-0">
           <InboxContent />
         </PopoverContent>
       </PopoverPortal>
@@ -85,7 +91,13 @@ const InboxInner = () => {
   );
 };
 
-export const InboxButton = () => {
+export const InboxButton = ({
+  align,
+  side,
+}: {
+  align?: 'start' | 'center' | 'end';
+  side?: 'top' | 'bottom' | 'left' | 'right';
+}) => {
   const { user } = useUser();
   const { currentEnvironment } = useEnvironment();
   const { isWorkflowEditorPage: isTestPage } = useWorkflowEditorPage();
@@ -100,7 +112,7 @@ export const InboxButton = () => {
   const subscriber = useMemo(
     () => ({
       subscriberId: isTestPage ? (user?.externalId ?? '') : `org_${currentOrganization?._id}:user_${user?.externalId}`,
-      email: user?.primaryEmailAddress?.emailAddress ?? '',
+      email: user?.primaryEmailAddress?.emailAddress ?? user?.emailAddresses?.[0]?.emailAddress ?? '',
       firstName: user?.firstName ?? '',
       lastName: user?.lastName ?? '',
     }),
@@ -108,6 +120,7 @@ export const InboxButton = () => {
       isTestPage,
       user?.externalId,
       user?.primaryEmailAddress?.emailAddress,
+      user?.emailAddresses,
       user?.firstName,
       user?.lastName,
       currentOrganization?._id,
@@ -141,7 +154,7 @@ export const InboxButton = () => {
       socketUrl={shouldUseProductionApi ? 'https://ws.novu.co' : apiHostnameManager.getWebSocketHostname()}
       localization={localization}
     >
-      <InboxInner />
+      <InboxInner align={align} side={side} />
     </Inbox>
   );
 };

@@ -1,4 +1,3 @@
-import { FeatureFlagsKeysEnum } from '@novu/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { RiArrowLeftSLine, RiRobot2Line } from 'react-icons/ri';
@@ -15,8 +14,9 @@ import {
 import { NovuApiError } from '@/api/api.client';
 import { AgentDetailsHeader } from '@/components/agents/agent-details-header';
 import { AgentIntegrationsTab } from '@/components/agents/agent-integrations-tab';
-import { AgentSetupModal } from '@/components/agents/agent-setup-modal';
 import { AgentOverviewTab } from '@/components/agents/agent-overview-tab';
+import { AgentSetupModal } from '@/components/agents/agent-setup-modal';
+import { AgentExceedsPlanBanner } from '@/components/agents/agents-plan-limit-banner';
 import { DeleteAgentDialog } from '@/components/agents/delete-agent-dialog';
 import { DashboardLayout } from '@/components/dashboard-layout';
 import { PageMeta } from '@/components/page-meta';
@@ -33,8 +33,10 @@ import { CompactButton } from '@/components/primitives/button-compact';
 import { Skeleton } from '@/components/primitives/skeleton';
 import { showErrorToast, showSuccessToast } from '@/components/primitives/sonner-helpers';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/primitives/tabs';
+import TruncatedText from '@/components/truncated-text';
 import { requireEnvironment, useEnvironment } from '@/context/environment/hooks';
-import { useFeatureFlag } from '@/hooks/use-feature-flag';
+import { useAgentRoutes } from '@/hooks/use-agent-routes';
+import { useAreConversationalAgentsAvailable } from '@/hooks/use-are-conversational-agents-available';
 import { useTelemetry } from '@/hooks/use-telemetry';
 import {
   AGENT_DETAILS_DEFAULT_TAB,
@@ -42,7 +44,6 @@ import {
   type AgentDetailsTab,
   buildRoute,
   parseAgentDetailsTab,
-  ROUTES,
 } from '@/utils/routes';
 import { TelemetryEvent } from '@/utils/telemetry';
 
@@ -89,28 +90,38 @@ export function AgentDetailsPage() {
   const location = useLocation();
   const queryClient = useQueryClient();
   const { currentEnvironment, readOnly } = useEnvironment();
-  const isConversationalAgentsEnabled = useFeatureFlag(FeatureFlagsKeysEnum.IS_CONVERSATIONAL_AGENTS_ENABLED, false);
+  const areAgentsAvailable = useAreConversationalAgentsAvailable();
+  const agentRoutes = useAgentRoutes();
   const [agentToDelete, setAgentToDelete] = useState<AgentResponse | null>(null);
   const [setupModalDismissed, setSetupModalDismissed] = useState(false);
   const track = useTelemetry();
   const lastAgentDetailsTelemetryKey = useRef<string | null>(null);
 
-  const agentsListPath = buildRoute(ROUTES.AGENTS, {
+  const agentsListPath = buildRoute(agentRoutes.list, {
     environmentSlug: currentEnvironment?.slug ?? '',
   });
 
   const agentQuery = useQuery({
     queryKey: getAgentDetailQueryKey(currentEnvironment?._id, agentIdentifier),
     queryFn: () => getAgent(requireEnvironment(currentEnvironment, 'No environment selected'), agentIdentifier),
-    enabled: Boolean(currentEnvironment && agentIdentifier && isConversationalAgentsEnabled),
+    enabled: Boolean(currentEnvironment && agentIdentifier && areAgentsAvailable),
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (identifier: string) =>
-      deleteAgent(requireEnvironment(currentEnvironment, 'No environment selected'), identifier),
-    onSuccess: async (_, identifier) => {
+    mutationFn: ({
+      identifier,
+      deleteFromProvider,
+    }: {
+      identifier: string;
+      name: string;
+      deleteFromProvider?: boolean;
+    }) =>
+      deleteAgent(requireEnvironment(currentEnvironment, 'No environment selected'), identifier, {
+        deleteFromProvider,
+      }),
+    onSuccess: async (_, { identifier, name }) => {
       setAgentToDelete(null);
-      showSuccessToast('Agent deleted', 'The agent was removed.');
+      showSuccessToast(`Deleted agent: ${name.length > 40 ? `${name.slice(0, 40)}…` : name}`);
       track(TelemetryEvent.AGENT_DELETED_FROM_DASHBOARD, { agentIdentifier: identifier });
       await queryClient.invalidateQueries({ queryKey: [AGENTS_LIST_QUERY_KEY] });
       navigate(agentsListPath);
@@ -130,7 +141,7 @@ export function AgentDetailsPage() {
         agentIdentifier,
         limit: 100,
       }),
-    enabled: Boolean(currentEnvironment && agentIdentifier && isConversationalAgentsEnabled),
+    enabled: Boolean(currentEnvironment && agentIdentifier && areAgentsAvailable),
   });
 
   const hasConnectedIntegration = useMemo(() => {
@@ -154,7 +165,7 @@ export function AgentDetailsPage() {
   const currentTab = integrationIdentifier ? 'integrations' : parseAgentDetailsTab(agentTabParam);
 
   useEffect(() => {
-    if (!isConversationalAgentsEnabled || !agentIdentifier || !agentQuery.data) {
+    if (!areAgentsAvailable || !agentIdentifier || !agentQuery.data) {
       return;
     }
 
@@ -177,9 +188,9 @@ export function AgentDetailsPage() {
         integrationIdentifier,
       });
     }
-  }, [agentIdentifier, agentQuery.data, currentTab, integrationIdentifier, isConversationalAgentsEnabled, track]);
+  }, [agentIdentifier, agentQuery.data, currentTab, integrationIdentifier, areAgentsAvailable, track]);
 
-  if (!isConversationalAgentsEnabled) {
+  if (!areAgentsAvailable) {
     return <Navigate to={agentsListPath} replace />;
   }
 
@@ -191,7 +202,7 @@ export function AgentDetailsPage() {
     return (
       <Navigate
         replace
-        to={`${buildRoute(ROUTES.AGENT_DETAILS_TAB, {
+        to={`${buildRoute(agentRoutes.detailsTab, {
           environmentSlug: currentEnvironment.slug,
           agentIdentifier: encodeURIComponent(agentIdentifier),
           agentTab: AGENT_DETAILS_DEFAULT_TAB,
@@ -220,7 +231,7 @@ export function AgentDetailsPage() {
     }
 
     navigate(
-      `${buildRoute(ROUTES.AGENT_DETAILS_TAB, {
+      `${buildRoute(agentRoutes.detailsTab, {
         environmentSlug: currentEnvironment.slug,
         agentIdentifier: encodeURIComponent(agent.identifier),
         agentTab: value,
@@ -260,7 +271,7 @@ export function AgentDetailsPage() {
             ) : (
               <BreadcrumbPage className="flex min-w-0 items-center gap-1.5">
                 <RiRobot2Line className="text-text-sub size-4 shrink-0" aria-hidden />
-                <span className="truncate">{breadcrumbCurrentLabel}</span>
+                <TruncatedText className="min-w-0 max-w-[40ch]">{breadcrumbCurrentLabel}</TruncatedText>
                 <Badge color="gray" size="sm" variant="lighter" className="shrink-0">
                   BETA
                 </Badge>
@@ -302,13 +313,19 @@ export function AgentDetailsPage() {
           <>
             <AgentDetailsHeader agent={agent} isLoading={false} onRequestDelete={setAgentToDelete} />
 
+            {agent.exceedsPlanLimit ? (
+              <div className="px-4 pb-2 md:px-6">
+                <AgentExceedsPlanBanner />
+              </div>
+            ) : null}
+
             <Tabs value={currentTab} onValueChange={handleTabChange} className="-mx-2 w-full">
               <TabsList align="start" variant="regular" className="border-t-transparent px-4 py-0! md:px-6">
                 <TabsTrigger variant="regular" value="overview" size="xl">
                   Overview
                 </TabsTrigger>
                 <TabsTrigger variant="regular" value="integrations" size="xl">
-                  Integrations
+                  Channels
                 </TabsTrigger>
               </TabsList>
 
@@ -329,14 +346,19 @@ export function AgentDetailsPage() {
                   setAgentToDelete(null);
                 }
               }}
-              onConfirm={() => {
+              onConfirm={({ deleteFromProvider }) => {
                 if (agentToDelete) {
-                  deleteMutation.mutate(agentToDelete.identifier);
+                  deleteMutation.mutate({
+                    identifier: agentToDelete.identifier,
+                    name: agentToDelete.name,
+                    deleteFromProvider,
+                  });
                 }
               }}
               agentName={agentToDelete?.name ?? ''}
               agentIdentifier={agentToDelete?.identifier ?? ''}
               isDeleting={deleteMutation.isPending}
+              isManagedRuntime={agentToDelete?.runtime === 'managed'}
             />
 
             <AgentSetupModal

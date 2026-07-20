@@ -6,9 +6,9 @@ export type {
   AgentAction,
   AgentActionContext,
   AgentAttachment,
-  AgentBridgeRequest,
   AgentContext,
   AgentConversation,
+  AgentHandlerContext,
   AgentHandlers,
   AgentHistoryEntry,
   AgentMessage,
@@ -17,25 +17,22 @@ export type {
   AgentPlatformContext,
   AgentReaction,
   AgentReactionContext,
-  AgentReplyPayload,
   AgentResolveContext,
   AgentSubscriber,
+  AgentToolCall,
   CardChild,
   CardElement,
-  EditPayload,
   FileRef,
   MessageContent,
-  MetadataSignal,
-  ReplyContent,
   ReplyHandle,
-  SentMessageInfo,
-  Signal,
-  TriggerSignal,
+  ToolApprovalCard,
+  ToolApprovalConfig,
+  ToolApprovalDecision,
 } from './resources';
 export {
   Actions,
   AgentDeliveryError,
-  AgentEventEnum,
+  AgentError,
   agent,
   Button,
   Card,
@@ -45,6 +42,7 @@ export {
   Select,
   SelectOption,
   TextInput,
+  toAgentError,
   workflow,
 } from './resources';
 export type {
@@ -55,6 +53,7 @@ export type {
   PushStepResolver,
   SmsStepResolver,
   StepResolverContext,
+  ToolStepResolver,
 } from './resources/step-resolver/step';
 export { step } from './resources/step-resolver/step';
 export { providerSchemas } from './schemas';

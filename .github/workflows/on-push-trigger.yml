@@ -16,7 +16,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           fetch-depth: 0
 
@@ -133,6 +133,7 @@ jobs:
           gh workflow run "deploy.yml" \
             --ref next \
             -f environment=staging \
+            -f runner=github \
             -f deploy_api=${{ steps.determine-services.outputs.deploy_api }} \
             -f deploy_worker=${{ steps.determine-services.outputs.deploy_worker }} \
             -f deploy_ws=${{ steps.determine-services.outputs.deploy_ws }} \

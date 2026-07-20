@@ -1,4 +1,9 @@
-import type { IEmailAlternative } from '@novu/shared';
+import type {
+  EmailWebhookDomainContext,
+  EmailWebhookRouteContext,
+  IEmailAlternative,
+  NovuEmailAttachment,
+} from '@novu/shared';
 import type { Adapter } from 'chat';
 
 export type { EmailWebhookPayload, NovuEmailAttachment } from '@novu/shared';
@@ -7,9 +12,41 @@ export interface NovuEmailAdapterConfig {
   senderName?: string;
   signingSecret: string;
   sendEmail: (params: SendEmailParams) => Promise<{ messageId?: string }>;
+  /**
+   * Resolves a URL for an interactive `<Button id="…">` rendered inside an outbound email.
+   * Called once per button before the email HTML is rendered. When omitted, action buttons
+   * fall back to the legacy `href="#"` (no-op) behavior — `<LinkButton url="…">` always uses
+   * its explicit URL and is never passed to this builder.
+   */
+  actionUrlBuilder?: ActionUrlBuilder;
 }
 
+export type ActionButtonStyle = 'primary' | 'danger' | 'default';
+
+export type ActionUrlBuilder = (params: {
+  threadId: string;
+  messageId: string;
+  actionId: string;
+  value?: string;
+  label?: string;
+  /** Echoes the `<Button style="…">` prop so the click-confirmation page can render a
+   *  destructive variant (red button + warning copy) when appropriate. */
+  style?: ActionButtonStyle;
+}) => Promise<string>;
+
 export type EmailAlternative = IEmailAlternative;
+
+export interface SendEmailAttachment {
+  /** Original filename of the attachment. */
+  filename: string;
+  /** MIME content type (e.g. "application/pdf"). */
+  contentType?: string;
+  /** Binary content of the attachment. */
+  data: Buffer;
+  /** Content-ID for inline (embedded) attachments. */
+  cid?: string;
+  disposition?: 'attachment' | 'inline';
+}
 
 export interface SendEmailParams {
   from: string;
@@ -18,6 +55,7 @@ export interface SendEmailParams {
   html: string;
   text?: string;
   alternatives?: EmailAlternative[];
+  attachments?: SendEmailAttachment[];
   inReplyTo?: string;
   references?: string;
   messageId?: string;
@@ -36,9 +74,22 @@ export interface NovuEmailRawMessage {
   subject: string;
   text?: string;
   html?: string;
+  /** RFC 2822 `In-Reply-To` header as sent by the client (parent message). */
+  inReplyTo?: string;
+  /** RFC 2822 `References` header as sent by the client (whitespace-separated chain). */
+  references?: string;
   headers?: Record<string, string>;
+  domain?: EmailWebhookDomainContext;
+  route?: EmailWebhookRouteContext;
   createdAt: string;
-  attachments?: import('@novu/shared').NovuEmailAttachment[];
+  attachments?: NovuEmailAttachment[];
+  /**
+   * Sender-authentication verdicts (`'pass'` / `'failed'`) forwarded from the
+   * inbound-mail service. Downstream identity resolution must treat the
+   * spoofable `from` address as untrusted unless both are `'pass'`.
+   */
+  dkim?: string;
+  spf?: string;
 }
 
 export type NovuEmailAdapter = Adapter<NovuEmailThreadId, NovuEmailRawMessage>;

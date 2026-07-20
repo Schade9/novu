@@ -3,7 +3,7 @@ import { Link as RouterLink, useLocation } from 'react-router-dom';
 import { cn } from '@/utils/ui';
 
 const linkVariants = cva(
-  `flex items-center gap-2 text-sm py-1.5 px-2 rounded-lg focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring cursor-pointer`,
+  `flex items-center gap-2 text-sm font-medium py-1.5 px-2 rounded-lg focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring cursor-pointer`,
   {
     variants: {
       variant: {
@@ -24,13 +24,14 @@ interface NavLinkProps {
   isExternal?: boolean;
   className?: string;
   children: React.ReactNode;
+  isExact?: boolean;
 }
 
-export function NavigationLink({ to, matchPaths, isExternal, className, children }: NavLinkProps) {
+export function NavigationLink({ to, matchPaths, isExternal, className, children, isExact = false }: NavLinkProps) {
   const { pathname } = useLocation();
   const isSelected =
     pathname === to ||
-    (to && pathname.startsWith(to)) ||
+    (to && pathname.startsWith(to) && !isExact) ||
     matchPaths?.some((path) => pathname.startsWith(path));
   const variant = isSelected ? 'selected' : 'default';
   const classNames = cn(linkVariants({ variant, className }));

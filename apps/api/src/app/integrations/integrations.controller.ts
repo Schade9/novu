@@ -5,6 +5,9 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
+  HttpStatus,
+  NotFoundException,
   Param,
   Post,
   Put,
@@ -25,10 +28,12 @@ import {
   PinoLogger,
   RequirePermissions,
 } from '@novu/application-generic';
-import { CommunityOrganizationRepository } from '@novu/dal';
+import { CommunityOrganizationRepository, IntegrationRepository } from '@novu/dal';
 import {
+  ApiAuthSchemeEnum,
   ApiServiceLevelEnum,
   ChannelTypeEnum,
+  ChatProviderIdEnum,
   FeatureFlagsKeysEnum,
   FeatureNameEnum,
   getFeatureForTierAsBoolean,
@@ -36,16 +41,27 @@ import {
   UserSessionData,
 } from '@novu/shared';
 import { Response } from 'express';
+import { ConfigureTelegramWebhookResponseDto } from '../agents/shared/dtos/configure-telegram-webhook-response.dto';
+import { IssueTelegramMobileLinkResponseDto } from '../agents/shared/dtos/issue-telegram-mobile-link-response.dto';
 import { RequireAuthentication } from '../auth/framework/auth.decorator';
-import { ExternalApiAccessible } from '../auth/framework/external-api.decorator';
+import { ExternalApiAccessible, OAuthAccessible } from '../auth/framework/external-api.decorator';
 import {
   ApiCommonResponses,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiResponse,
 } from '../shared/framework/response.decorator';
+import { KeylessAccessible } from '../shared/framework/swagger/keyless.security';
 import { SdkGroupName, SdkMethodName } from '../shared/framework/swagger/sdk.decorators';
 import { UserSession } from '../shared/framework/user.decorator';
+import { CONNECTION_RESULT_CSP } from '../shared/html/connection-result-page';
+import { assertEnvironmentScopedAccess, isEnvironmentScopedAuthScheme } from '../shared/utils/auth.utils';
+import { ConfigureTelegramWebhookCommand } from '../telegram-linking/configure-telegram-webhook/configure-telegram-webhook.command';
+import { ConfigureTelegramWebhook } from '../telegram-linking/configure-telegram-webhook/configure-telegram-webhook.usecase';
+import { IssueTelegramMobileLinkCommand } from '../telegram-linking/issue-telegram-mobile-link/issue-telegram-mobile-link.command';
+import { IssueTelegramMobileLink } from '../telegram-linking/issue-telegram-mobile-link/issue-telegram-mobile-link.usecase';
+import { IssueTelegramSubscriberLinkCommand } from '../telegram-linking/issue-telegram-subscriber-link/issue-telegram-subscriber-link.command';
+import { IssueTelegramSubscriberLink } from '../telegram-linking/issue-telegram-subscriber-link/issue-telegram-subscriber-link.usecase';
 import { AutoConfigureIntegrationResponseDto } from './dtos/auto-configure-integration-response.dto';
 import { CreateIntegrationRequestDto } from './dtos/create-integration-request.dto';
 import { GenerateChatOauthUrlRequestDto } from './dtos/generate-chat-oauth-url.dto';
@@ -53,8 +69,19 @@ import { GenerateChatOAuthUrlResponseDto } from './dtos/generate-chat-oauth-url-
 import { GenerateConnectOauthUrlRequestDto } from './dtos/generate-connect-oauth-url-request.dto';
 import { GenerateLinkUserOauthUrlRequestDto } from './dtos/generate-link-user-oauth-url-request.dto';
 import { ChannelTypeLimitDto } from './dtos/get-channel-type-limit.sto';
+import { IssueIntegrationMobileLinkRequestDto } from './dtos/issue-integration-mobile-link-request.dto';
+import { IssueIntegrationStoreTelegramMobileLinkResponseDto } from './dtos/issue-integration-store-telegram-mobile-link-response.dto';
+import { LinkChannelEndpointRequestDto } from './dtos/link-channel-endpoint-request.dto';
+import { LinkChannelEndpointResponseDto } from './dtos/link-channel-endpoint-response.dto';
 import { SlackQuickSetupRequestDto, SlackQuickSetupResponseDto } from './dtos/slack-quick-setup.dto';
 import { UpdateIntegrationRequestDto } from './dtos/update-integration.dto';
+import {
+  WhatsAppEmbeddedSignupRequestDto,
+  WhatsAppEmbeddedSignupResponseDto,
+} from './dtos/whatsapp-embedded-signup.dto';
+import { WhatsAppEmbeddedSignupAvailabilityResponseDto } from './dtos/whatsapp-embedded-signup-availability.dto';
+import { IssueWhatsAppSignupLinkRequestDto, IssueWhatsAppSignupLinkResponseDto } from './dtos/whatsapp-signup-link.dto';
+import { WhatsAppValidateTokenRequestDto, WhatsAppValidateTokenResponseDto } from './dtos/whatsapp-validate-token.dto';
 import { AutoConfigureIntegrationCommand } from './usecases/auto-configure-integration/auto-configure-integration.command';
 import { AutoConfigureIntegration } from './usecases/auto-configure-integration/auto-configure-integration.usecase';
 import { AzureSetupOauthCallbackCommand } from './usecases/azure-setup-oauth-callback/azure-setup-oauth-callback.command';
@@ -81,6 +108,8 @@ import { GetIntegrationsCommand } from './usecases/get-integrations/get-integrat
 import { GetIntegrations } from './usecases/get-integrations/get-integrations.usecase';
 import { GetWebhookSupportStatusCommand } from './usecases/get-webhook-support-status/get-webhook-support-status.command';
 import { GetWebhookSupportStatus } from './usecases/get-webhook-support-status/get-webhook-support-status.usecase';
+import { IssueIntegrationStoreTelegramMobileLinkCommand } from './usecases/issue-integration-store-telegram-mobile-link/issue-integration-store-telegram-mobile-link.command';
+import { IssueIntegrationStoreTelegramMobileLink } from './usecases/issue-integration-store-telegram-mobile-link/issue-integration-store-telegram-mobile-link.usecase';
 import { MsTeamsHealthCheckCommand } from './usecases/msteams-health-check/msteams-health-check.command';
 import {
   MsTeamsHealthCheck,
@@ -94,6 +123,14 @@ import { SlackQuickSetupCommand } from './usecases/slack-quick-setup/slack-quick
 import { SlackQuickSetup } from './usecases/slack-quick-setup/slack-quick-setup.usecase';
 import { UpdateIntegrationCommand } from './usecases/update-integration/update-integration.command';
 import { UpdateIntegration } from './usecases/update-integration/update-integration.usecase';
+import { IssueWhatsAppSignupLinkCommand } from './usecases/whatsapp/issue-whatsapp-signup-link.command';
+import { IssueWhatsAppSignupLink } from './usecases/whatsapp/issue-whatsapp-signup-link.usecase';
+import { WhatsAppEmbeddedSignupCommand } from './usecases/whatsapp/whatsapp-embedded-signup.command';
+import { WhatsAppEmbeddedSignup } from './usecases/whatsapp/whatsapp-embedded-signup.usecase';
+import { WhatsAppEmbeddedSignupAvailabilityCommand } from './usecases/whatsapp/whatsapp-embedded-signup-availability.command';
+import { WhatsAppEmbeddedSignupAvailability } from './usecases/whatsapp/whatsapp-embedded-signup-availability.usecase';
+import { WhatsAppValidateTokenCommand } from './usecases/whatsapp/whatsapp-validate-token.command';
+import { WhatsAppValidateToken } from './usecases/whatsapp/whatsapp-validate-token.usecase';
 
 @ApiCommonResponses()
 @Controller('/integrations')
@@ -123,21 +160,33 @@ export class IntegrationsController {
     private generateAzureSetupOauthUrlUsecase: GenerateAzureSetupOauthUrl,
     private azureSetupOauthCallbackUsecase: AzureSetupOauthCallback,
     private msTeamsHealthCheckUsecase: MsTeamsHealthCheck,
+    private whatsAppValidateTokenUsecase: WhatsAppValidateToken,
+    private whatsAppEmbeddedSignupUsecase: WhatsAppEmbeddedSignup,
+    private whatsAppEmbeddedSignupAvailabilityUsecase: WhatsAppEmbeddedSignupAvailability,
+    private issueWhatsAppSignupLinkUsecase: IssueWhatsAppSignupLink,
+    private issueIntegrationStoreTelegramMobileLinkUsecase: IssueIntegrationStoreTelegramMobileLink,
+    private issueTelegramSubscriberLinkUsecase: IssueTelegramSubscriberLink,
+    private issueTelegramMobileLinkUsecase: IssueTelegramMobileLink,
+    private configureTelegramWebhookUsecase: ConfigureTelegramWebhook,
+    private integrationRepository: IntegrationRepository,
     private logger: PinoLogger
   ) {
     this.logger.setContext(IntegrationsController.name);
   }
 
   @Get('/')
+  @OAuthAccessible()
   @ApiOkResponse({
     type: [IntegrationResponseDto],
     description: 'The list of integrations belonging to the organization that are successfully returned.',
   })
   @ApiOperation({
     summary: 'List all integrations',
-    description: 'List all the channels integrations created in the organization',
+    description:
+      'List all the channels integrations created in the organization. Only integration metadata is returned, credentials field is returned as an empty object.',
   })
   @ExternalApiAccessible()
+  @KeylessAccessible()
   @RequireAuthentication()
   @RequirePermissions(PermissionsEnum.INTEGRATION_READ)
   async listIntegrations(@UserSession() user: UserSessionData): Promise<IntegrationResponseDto[]> {
@@ -149,18 +198,21 @@ export class IntegrationsController {
         organizationId: user.organizationId,
         userId: user._id,
         returnCredentials: canAccessCredentials,
+        scopeToEnvironment: isEnvironmentScopedAuthScheme(user.scheme),
       })
     );
   }
 
   @Get('/active')
+  @OAuthAccessible()
   @ApiOkResponse({
     type: [IntegrationResponseDto],
     description: 'The list of active integrations belonging to the organization that are successfully returned.',
   })
   @ApiOperation({
     summary: 'List active integrations',
-    description: 'List all the active integrations created in the organization',
+    description:
+      'List all the active integrations created in the organization. Only integration metadata is returned, credentials field is returned as an empty object.',
   })
   @ExternalApiAccessible()
   @SdkMethodName('listActive')
@@ -175,6 +227,7 @@ export class IntegrationsController {
         organizationId: user.organizationId,
         userId: user._id,
         returnCredentials: canAccessCredentials,
+        scopeToEnvironment: isEnvironmentScopedAuthScheme(user.scheme),
       })
     );
   }
@@ -213,9 +266,10 @@ export class IntegrationsController {
   @ApiOperation({
     summary: 'Create an integration',
     description: `Create an integration for the current environment the user is based on the API key provided. 
-    Each provider supports different credentials, check the provider documentation for more details.`,
+    Each provider supports different credentials, check the provider documentation for more details. Only integration metadata is returned, credentials field is returned as an empty object.`,
   })
   @ExternalApiAccessible()
+  @KeylessAccessible()
   @RequireAuthentication()
   @RequirePermissions(PermissionsEnum.INTEGRATION_WRITE)
   async createIntegration(
@@ -223,6 +277,8 @@ export class IntegrationsController {
     @Body() body: CreateIntegrationRequestDto
   ): Promise<IntegrationResponseDto> {
     try {
+      assertEnvironmentScopedAccess(user.scheme, user.environmentId, body._environmentId);
+
       const canAccessCredentials = await this.canUserAccessCredentials(user);
       const integration = await this.createIntegrationUsecase.execute(
         CreateIntegrationCommand.create({
@@ -233,6 +289,7 @@ export class IntegrationsController {
           organizationId: user.organizationId,
           providerId: body.providerId,
           channel: body.channel,
+          kind: body.kind,
           credentials: body.credentials,
           active: body.active ?? false,
           check: body.check ?? false,
@@ -265,7 +322,7 @@ export class IntegrationsController {
   @ApiOperation({
     summary: 'Update an integration',
     description: `Update an integration by its unique key identifier **integrationId**. 
-    Each provider supports different credentials, check the provider documentation for more details.`,
+    Each provider supports different credentials, check the provider documentation for more details. Only integration metadata is returned, credentials field is returned as an empty object.`,
   })
   @ExternalApiAccessible()
   @RequireAuthentication()
@@ -276,6 +333,8 @@ export class IntegrationsController {
     @Body() body: UpdateIntegrationRequestDto
   ): Promise<IntegrationResponseDto> {
     try {
+      assertEnvironmentScopedAccess(user.scheme, user.environmentId, body._environmentId);
+
       const canAccessCredentials = await this.canUserAccessCredentials(user);
       const integration = await this.updateIntegrationUsecase.execute(
         UpdateIntegrationCommand.create({
@@ -283,7 +342,7 @@ export class IntegrationsController {
           name: body.name,
           identifier: body.identifier,
           environmentId: body._environmentId,
-          userEnvironmentId: user.environmentId,
+          userEnvironmentId: user.environmentId || undefined,
           organizationId: user.organizationId,
           integrationId,
           credentials: body.credentials,
@@ -291,6 +350,7 @@ export class IntegrationsController {
           check: body.check ?? false,
           conditions: body.conditions,
           configurations: body.configurations,
+          restrictToUserEnvironment: isEnvironmentScopedAuthScheme(user.scheme),
         })
       );
 
@@ -318,7 +378,7 @@ export class IntegrationsController {
   @ApiOperation({
     summary: 'Auto-configure an integration for inbound webhooks',
     description: `Auto-configure an integration by its unique key identifier **integrationId** for inbound webhook support. 
-    This will automatically generate required webhook signing keys and configure webhook endpoints.`,
+    This will automatically generate required webhook signing keys and configure webhook endpoints. Only integration metadata is returned, credentials field is returned as an empty object.`,
   })
   @ExternalApiAccessible()
   @RequireAuthentication()
@@ -330,8 +390,10 @@ export class IntegrationsController {
     const result = await this.autoConfigureIntegrationUsecase.execute(
       AutoConfigureIntegrationCommand.create({
         userId: user._id,
+        environmentId: user.environmentId,
         organizationId: user.organizationId,
         integrationId,
+        restrictToUserEnvironment: isEnvironmentScopedAuthScheme(user.scheme),
       })
     );
 
@@ -339,6 +401,7 @@ export class IntegrationsController {
   }
 
   @Post('/:integrationId/set-primary')
+  @OAuthAccessible()
   @ApiResponse(IntegrationResponseDto)
   @ApiNotFoundResponse({
     description: 'The integration with the integrationId provided does not exist in the database.',
@@ -347,7 +410,8 @@ export class IntegrationsController {
     summary: 'Update integration as primary',
     description: `Update an integration as **primary** by its unique key identifier **integrationId**. 
     This API will set the integration as primary for that channel in the current environment. 
-    Primary integration is used to deliver notification for sms and email channels in the workflow.`,
+    Primary integration is used to deliver notification for sms and email channels in the workflow. 
+    Only integration metadata is returned, credentials field is returned as an empty object.`,
   })
   @ExternalApiAccessible()
   @RequireAuthentication()
@@ -364,6 +428,7 @@ export class IntegrationsController {
         environmentId: user.environmentId,
         organizationId: user.organizationId,
         integrationId,
+        restrictToUserEnvironment: isEnvironmentScopedAuthScheme(user.scheme),
       })
     );
 
@@ -377,13 +442,15 @@ export class IntegrationsController {
   }
 
   @Delete('/:integrationId')
+  @OAuthAccessible()
   @ApiResponse(IntegrationResponseDto, 200, true)
   @ApiOperation({
     summary: 'Delete an integration',
     description: `Delete an integration by its unique key identifier **integrationId**. 
-    This action is irreversible.`,
+    This action is irreversible. Only integration metadata is returned, credentials field is returned as empty object.`,
   })
   @ExternalApiAccessible()
+  @KeylessAccessible()
   @RequireAuthentication()
   @RequirePermissions(PermissionsEnum.INTEGRATION_WRITE)
   async removeIntegration(
@@ -396,6 +463,7 @@ export class IntegrationsController {
         environmentId: user.environmentId,
         organizationId: user.organizationId,
         integrationId,
+        restrictToUserEnvironment: isEnvironmentScopedAuthScheme(user.scheme),
       })
     );
   }
@@ -624,7 +692,7 @@ export class IntegrationsController {
   @ApiOperation({
     summary: 'Generate chat OAuth URL',
     description: `**Deprecated** — use \`POST /integrations/channel-connections/oauth\` (connect) or \`POST /integrations/channel-endpoints/oauth\` (link_user) instead.
-    Generate an OAuth URL for chat integrations like Slack and MS Teams. 
+    Generate an OAuth URL for chat integrations like Slack, MS Teams, and Webex.
     This URL allows subscribers to authorize the integration, enabling the system to send messages 
     through their chat workspace. The generated URL expires after 5 minutes.`,
     deprecated: true,
@@ -660,12 +728,13 @@ export class IntegrationsController {
   @ApiResponse(GenerateChatOAuthUrlResponseDto, 201)
   @ApiOperation({
     summary: 'Generate OAuth URL for a workspace/tenant connection',
-    description: `Generate an OAuth URL that creates a workspace or tenant-level channel connection (Slack workspace install or MS Teams admin consent). 
+    description: `Generate an OAuth URL that creates a workspace or tenant-level channel connection (Slack workspace install, MS Teams admin consent, or Webex integration authorization).
     The generated URL expires after 5 minutes.`,
   })
   @SdkMethodName('generateConnectOAuthUrl')
   @RequirePermissions(PermissionsEnum.INTEGRATION_WRITE)
   @ExternalApiAccessible()
+  @KeylessAccessible()
   @RequireAuthentication()
   async generateConnectOAuthUrl(
     @UserSession() user: UserSessionData,
@@ -692,7 +761,7 @@ export class IntegrationsController {
   @ApiResponse(GenerateChatOAuthUrlResponseDto, 201)
   @ApiOperation({
     summary: 'Generate OAuth URL to link a subscriber user identity',
-    description: `Generate an OAuth URL that links a specific subscriber to their chat identity (Slack user ID or MS Teams user OID). 
+    description: `Generate an OAuth URL that links a specific subscriber to their chat identity (Slack user ID, MS Teams user OID, or Webex person).
     The generated URL expires after 5 minutes.`,
   })
   @SdkMethodName('generateLinkUserOAuthUrl')
@@ -721,7 +790,7 @@ export class IntegrationsController {
   @Get('/chat/oauth/callback')
   @ApiOperation({
     summary: 'Handle chat OAuth callback',
-    description: `Generic OAuth callback handler for all chat integrations (Slack, Teams, Discord, etc.). 
+    description: `Generic OAuth callback handler for all chat integrations (Slack, Teams, Webex, etc.).
     This endpoint processes the authorization code and stores the connection for any supported chat provider.`,
   })
   @ApiExcludeEndpoint()
@@ -757,7 +826,7 @@ export class IntegrationsController {
 
     if (result.type === ResponseTypeEnum.HTML) {
       res.setHeader('Content-Type', 'text/html');
-      res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'");
+      res.setHeader('Content-Security-Policy', CONNECTION_RESULT_CSP);
       res.send(result.result);
 
       return;
@@ -766,13 +835,306 @@ export class IntegrationsController {
     res.redirect(result.result);
   }
 
+  @Post('/whatsapp/validate-token')
+  @ApiResponse(WhatsAppValidateTokenResponseDto, 200)
+  @ApiOperation({
+    summary: 'Validate WhatsApp Business credentials inline',
+    description:
+      'Calls the Meta Graph API to validate a WhatsApp Cloud API access token (and optional phone number ID) before the user saves the integration. Returns the available scopes and resolves the WhatsApp Business Account ID, used by the dashboard onboarding flow to surface friendly inline errors.',
+  })
+  @ApiExcludeEndpoint()
+  @RequireAuthentication()
+  @RequirePermissions(PermissionsEnum.INTEGRATION_WRITE)
+  async validateWhatsAppToken(
+    @UserSession() user: UserSessionData,
+    @Body() body: WhatsAppValidateTokenRequestDto
+  ): Promise<WhatsAppValidateTokenResponseDto> {
+    return this.whatsAppValidateTokenUsecase.execute(
+      WhatsAppValidateTokenCommand.create({
+        userId: user._id,
+        organizationId: user.organizationId,
+        accessToken: body.accessToken,
+        phoneNumberIdentification: body.phoneNumberIdentification,
+        businessAccountId: body.businessAccountId,
+      })
+    );
+  }
+
+  @Post('/whatsapp/embedded-signup')
+  @ApiResponse(WhatsAppEmbeddedSignupResponseDto, 200)
+  @ApiOperation({
+    summary: 'Complete WhatsApp Embedded Signup',
+    description:
+      'Exchanges a Meta Embedded Signup authorization code for a business integration token, saves WhatsApp credentials on the integration, registers the phone number when possible, and configures the agent webhook with Meta.',
+  })
+  @ApiExcludeEndpoint()
+  @RequireAuthentication()
+  @RequirePermissions(PermissionsEnum.INTEGRATION_WRITE)
+  @HttpCode(HttpStatus.OK)
+  async completeWhatsAppEmbeddedSignup(
+    @UserSession() user: UserSessionData,
+    @Body() body: WhatsAppEmbeddedSignupRequestDto
+  ): Promise<WhatsAppEmbeddedSignupResponseDto> {
+    return this.whatsAppEmbeddedSignupUsecase.execute(
+      WhatsAppEmbeddedSignupCommand.create({
+        userId: user._id,
+        environmentId: user.environmentId,
+        organizationId: user.organizationId,
+        code: body.code,
+        wabaId: body.wabaId,
+        phoneNumberId: body.phoneNumberId,
+        integrationIdentifier: body.integrationIdentifier,
+        agentIdentifier: body.agentIdentifier,
+      })
+    );
+  }
+
+  @Get('/whatsapp/embedded-signup/availability')
+  @ApiResponse(WhatsAppEmbeddedSignupAvailabilityResponseDto, 200)
+  @ApiOperation({
+    summary: 'Check WhatsApp Embedded Signup availability',
+    description:
+      'Reports whether Meta Embedded Signup can be completed on this deployment for the caller organization (feature flag plus Tech Provider credentials). Used by the connect CLI to route between the embedded-signup flow and the classic dashboard handoff.',
+  })
+  @ApiExcludeEndpoint()
+  @ExternalApiAccessible()
+  @KeylessAccessible()
+  @RequireAuthentication()
+  @RequirePermissions(PermissionsEnum.INTEGRATION_READ)
+  async getWhatsAppEmbeddedSignupAvailability(
+    @UserSession() user: UserSessionData
+  ): Promise<WhatsAppEmbeddedSignupAvailabilityResponseDto> {
+    return this.whatsAppEmbeddedSignupAvailabilityUsecase.execute(
+      WhatsAppEmbeddedSignupAvailabilityCommand.create({
+        userId: user._id,
+        environmentId: user.environmentId,
+        organizationId: user.organizationId,
+      })
+    );
+  }
+
+  @Post('/whatsapp/signup-link')
+  @ApiResponse(IssueWhatsAppSignupLinkResponseDto, 200)
+  @ApiOperation({
+    summary: 'Issue a public WhatsApp Embedded Signup link',
+    description:
+      'Mints an opaque, single-use token bound to the agent + WhatsApp integration and returns the public signup page URL. ' +
+      'Used by the connect CLI (keyless or authenticated) to hand the browser off to Meta Embedded Signup.',
+  })
+  @ApiExcludeEndpoint()
+  @ExternalApiAccessible()
+  @KeylessAccessible()
+  @RequireAuthentication()
+  @RequirePermissions(PermissionsEnum.INTEGRATION_WRITE)
+  @HttpCode(HttpStatus.OK)
+  async createWhatsAppSignupLink(
+    @UserSession() user: UserSessionData,
+    @Body() body: IssueWhatsAppSignupLinkRequestDto
+  ): Promise<IssueWhatsAppSignupLinkResponseDto> {
+    return this.issueWhatsAppSignupLinkUsecase.execute(
+      IssueWhatsAppSignupLinkCommand.create({
+        userId: user._id,
+        environmentId: user.environmentId,
+        organizationId: user.organizationId,
+        agentIdentifier: body.agentIdentifier,
+        integrationIdentifier: body.integrationIdentifier,
+      })
+    );
+  }
+
+  @Post('/channel-endpoints/link')
+  @ExternalApiAccessible()
+  @KeylessAccessible()
+  @HttpCode(HttpStatus.OK)
+  @ApiResponse(LinkChannelEndpointResponseDto, 200)
+  @ApiOperation({
+    summary: 'Issue a URL to link a subscriber chat identity',
+    description:
+      'Returns a provider-specific URL the subscriber opens to link their chat identity. ' +
+      'The integration provider is resolved from integrationIdentifier; Telegram returns a deep link.',
+  })
+  @SdkGroupName('Integrations')
+  @SdkMethodName('linkChannelEndpoint')
+  @RequirePermissions(PermissionsEnum.INTEGRATION_WRITE)
+  @RequireAuthentication()
+  async linkChannelEndpoint(
+    @UserSession() user: UserSessionData,
+    @Body() body: LinkChannelEndpointRequestDto
+  ): Promise<LinkChannelEndpointResponseDto> {
+    const integration = await this.integrationRepository.findOne(
+      {
+        identifier: body.integrationIdentifier,
+        _environmentId: user.environmentId,
+        _organizationId: user.organizationId,
+      },
+      '_id providerId'
+    );
+
+    if (!integration) {
+      throw new NotFoundException(`Integration ${body.integrationIdentifier} not found`);
+    }
+
+    const providerId = integration.providerId as ChatProviderIdEnum;
+
+    switch (providerId) {
+      case ChatProviderIdEnum.Telegram: {
+        const result = await this.issueTelegramSubscriberLinkUsecase.execute(
+          IssueTelegramSubscriberLinkCommand.create({
+            environmentId: user.environmentId,
+            organizationId: user.organizationId,
+            integrationIdentifier: body.integrationIdentifier,
+            subscriberId: body.subscriberId,
+          })
+        );
+
+        return {
+          url: result.deepLinkUrl,
+          providerMetadata: {
+            botUsername: result.botUsername,
+            expiresAt: result.expiresAt,
+          },
+        };
+      }
+      default:
+        throw new BadRequestException(
+          `Provider "${providerId}" does not support subscriber chat linking via this endpoint.`
+        );
+    }
+  }
+
+  @Post('/:integrationIdentifier/webhook/configure')
+  @ExternalApiAccessible()
+  @KeylessAccessible()
+  @HttpCode(HttpStatus.OK)
+  @ApiResponse(ConfigureTelegramWebhookResponseDto, 200)
+  @ApiOperation({
+    summary: 'Configure a chat integration webhook',
+    description:
+      'Registers the Novu webhook URL with the chat provider for the specified integration. ' +
+      'Telegram is the only supported provider initially.',
+  })
+  @RequirePermissions(PermissionsEnum.INTEGRATION_WRITE)
+  @RequireAuthentication()
+  async configureIntegrationWebhook(
+    @UserSession() user: UserSessionData,
+    @Param('integrationIdentifier') integrationIdentifier: string
+  ): Promise<ConfigureTelegramWebhookResponseDto> {
+    const integration = await this.integrationRepository.findOne(
+      {
+        identifier: integrationIdentifier,
+        _environmentId: user.environmentId,
+        _organizationId: user.organizationId,
+      },
+      '_id providerId'
+    );
+
+    if (!integration) {
+      throw new NotFoundException(`Integration ${integrationIdentifier} not found`);
+    }
+
+    const providerId = integration.providerId as ChatProviderIdEnum;
+
+    switch (providerId) {
+      case ChatProviderIdEnum.Telegram:
+        return this.configureTelegramWebhookUsecase.execute(
+          ConfigureTelegramWebhookCommand.create({
+            userId: user._id,
+            environmentId: user.environmentId,
+            organizationId: user.organizationId,
+            integrationIdentifier,
+          })
+        );
+      default:
+        throw new BadRequestException(
+          `Provider "${providerId}" does not support webhook configuration via this endpoint.`
+        );
+    }
+  }
+
+  @Post('/:integrationIdentifier/mobile-link')
+  @ExternalApiAccessible()
+  @KeylessAccessible()
+  @HttpCode(HttpStatus.OK)
+  @ApiResponse(IssueTelegramMobileLinkResponseDto, 200)
+  @SdkMethodName('createMobileLink')
+  @ApiOperation({
+    summary: 'Issue a short-lived mobile setup link for an existing integration',
+    description:
+      'Returns an opaque, single-use setup token plus a mobile URL for configuring an existing chat integration. ' +
+      'Telegram is the only supported provider initially.',
+  })
+  @RequirePermissions(PermissionsEnum.INTEGRATION_WRITE)
+  @RequireAuthentication()
+  async createIntegrationMobileLink(
+    @UserSession() user: UserSessionData,
+    @Param('integrationIdentifier') integrationIdentifier: string,
+    @Body() body?: IssueIntegrationMobileLinkRequestDto
+  ): Promise<IssueTelegramMobileLinkResponseDto> {
+    const integration = await this.integrationRepository.findOne(
+      {
+        identifier: integrationIdentifier,
+        _environmentId: user.environmentId,
+        _organizationId: user.organizationId,
+      },
+      '_id providerId'
+    );
+
+    if (!integration) {
+      throw new NotFoundException(`Integration ${integrationIdentifier} not found`);
+    }
+
+    const providerId = integration.providerId as ChatProviderIdEnum;
+
+    switch (providerId) {
+      case ChatProviderIdEnum.Telegram:
+        return this.issueTelegramMobileLinkUsecase.execute(
+          IssueTelegramMobileLinkCommand.create({
+            userId: user._id,
+            environmentId: user.environmentId,
+            organizationId: user.organizationId,
+            integrationIdentifier,
+            subscriberId: body?.subscriberId,
+          })
+        );
+      default:
+        throw new BadRequestException(
+          `Provider "${providerId}" does not support mobile setup links via this endpoint.`
+        );
+    }
+  }
+
+  @Post('/telegram/mobile-link')
+  @ApiResponse(IssueIntegrationStoreTelegramMobileLinkResponseDto, 200)
+  @ApiOperation({
+    summary: 'Issue a short-lived Telegram mobile setup link for the integration store',
+    description:
+      'Returns an opaque, single-use, short-lived setup token plus a mobile URL. The visitor pastes the BotFather token on the linked landing page and the consume endpoint creates a brand-new Telegram integration in the current environment.',
+  })
+  @ApiExcludeEndpoint()
+  @RequireAuthentication()
+  @RequirePermissions(PermissionsEnum.INTEGRATION_WRITE)
+  @HttpCode(HttpStatus.OK)
+  async createTelegramMobileLink(
+    @UserSession() user: UserSessionData
+  ): Promise<IssueIntegrationStoreTelegramMobileLinkResponseDto> {
+    return this.issueIntegrationStoreTelegramMobileLinkUsecase.execute(
+      IssueIntegrationStoreTelegramMobileLinkCommand.create({
+        userId: user._id,
+        environmentId: user.environmentId,
+        organizationId: user.organizationId,
+      })
+    );
+  }
+
   @Post('/:integrationId/slack-quick-setup')
+  @ExternalApiAccessible()
   @ApiResponse(SlackQuickSetupResponseDto, 201)
   @ApiOperation({
     summary: 'Quick-setup a Slack integration',
     description: `Creates a Slack app from a manifest using the provided App Configuration Token and saves the resulting credentials (client ID, client secret, signing secret) directly on the integration. The configuration token is used ephemerally and is never stored.`,
   })
   @ApiExcludeEndpoint()
+  @KeylessAccessible()
   @RequireAuthentication()
   @RequirePermissions(PermissionsEnum.INTEGRATION_WRITE)
   async slackQuickSetup(
@@ -795,6 +1157,20 @@ export class IntegrationsController {
   }
 
   private async canUserAccessCredentials(user: UserSessionData): Promise<boolean> {
+    /*
+     * API-key, keyless, and OAuth auth must never receive decrypted provider credentials,
+     * regardless of RBAC state. API keys grant ALL_PERMISSIONS in `community.auth.service.ts`,
+     * which would otherwise allow the RBAC path below to succeed and leak every stored
+     * provider secret to any caller holding an environment API key or OAuth token.
+     */
+    if (
+      user.scheme === ApiAuthSchemeEnum.API_KEY ||
+      user.scheme === ApiAuthSchemeEnum.KEYLESS ||
+      user.scheme === ApiAuthSchemeEnum.OAUTH2
+    ) {
+      return false;
+    }
+
     const organization = await this.organizationRepository.findOne({
       _id: user.organizationId,
     });

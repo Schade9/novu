@@ -2,7 +2,6 @@ import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import {
   emailControlSchema,
   evaluateRules,
-  FeatureFlagsService,
   InMemoryLRUCacheService,
   InMemoryLRUCacheStore,
   Instrument,
@@ -30,6 +29,7 @@ import {
   InAppOutputRendererUsecase,
   PushOutputRendererUsecase,
   SmsOutputRendererUsecase,
+  ToolOutputRendererUsecase,
 } from '../output-renderers';
 import { DelayOutputRendererUsecase } from '../output-renderers/delay-output-renderer.usecase';
 import { DigestOutputRendererUsecase } from '../output-renderers/digest-output-renderer.usecase';
@@ -50,10 +50,10 @@ export class ConstructFrameworkWorkflow {
     private smsOutputRendererUseCase: SmsOutputRendererUsecase,
     private chatOutputRendererUseCase: ChatOutputRendererUsecase,
     private pushOutputRendererUseCase: PushOutputRendererUsecase,
+    private toolOutputRendererUseCase: ToolOutputRendererUsecase,
     private delayOutputRendererUseCase: DelayOutputRendererUsecase,
     private digestOutputRendererUseCase: DigestOutputRendererUsecase,
     private throttleOutputRendererUseCase: ThrottleOutputRendererUsecase,
-    private featureFlagsService: FeatureFlagsService,
     private inMemoryLRUCacheService: InMemoryLRUCacheService
   ) {
     this.logger.setContext(this.constructor.name);
@@ -102,13 +102,13 @@ export class ConstructFrameworkWorkflow {
       _creatorId: environment._organizationId,
     } as NotificationTemplateEntity;
 
-    return workflow(LAYOUT_PREVIEW_WORKFLOW_ID, async ({ step, payload, subscriber, context }) => {
+    return workflow(LAYOUT_PREVIEW_WORKFLOW_ID, async ({ step, payload, subscriber, context, env }) => {
       await step.email(
         LAYOUT_PREVIEW_EMAIL_STEP,
         async (controlValues) => {
           return this.emailOutputRendererUseCase.execute({
             controlValues,
-            fullPayloadForRender: { payload, subscriber, context, steps: {} },
+            fullPayloadForRender: { payload, subscriber, context, steps: {}, env },
             dbWorkflow: syntheticDbWorkflow,
             organization,
             locale: subscriber.locale ?? undefined,
@@ -140,13 +140,14 @@ export class ConstructFrameworkWorkflow {
   }): Workflow {
     return workflow(
       dbWorkflow.triggers[0].identifier,
-      async ({ step, payload, subscriber, context }) => {
+      async ({ step, payload, subscriber, context, env }) => {
         const fullPayloadForRender: FullPayloadForRender = {
           workflow: dbWorkflow as unknown as Record<string, unknown>,
           payload,
           subscriber,
           context,
           steps: {},
+          env,
         };
         for (const staticStep of dbWorkflow.steps) {
           fullPayloadForRender.steps[staticStep.stepId || staticStep._templateId] = await this.constructStep({
@@ -295,6 +296,20 @@ export class ConstructFrameworkWorkflow {
           stepId,
           async (controlValues) => {
             return this.pushOutputRendererUseCase.execute({
+              controlValues,
+              fullPayloadForRender,
+              dbWorkflow,
+              organization,
+              locale,
+            });
+          },
+          this.constructChannelStepOptions(staticStep, fullPayloadForRender)
+        );
+      case StepTypeEnum.TOOL:
+        return step.tool(
+          stepId,
+          async (controlValues) => {
+            return this.toolOutputRendererUseCase.execute({
               controlValues,
               fullPayloadForRender,
               dbWorkflow,
